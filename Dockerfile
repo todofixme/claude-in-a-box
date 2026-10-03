@@ -16,7 +16,7 @@ RUN usermod --login claude --home /home/claude --move-home node \
   && echo 'claude ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/claude \
   && chmod 0440 /etc/sudoers.d/claude
 
-# JDK only: Kotlin/Spring Boot projects bring their own Gradle or Maven
+# JDK only: a Kotlin/Spring Boot Workspace brings its own Gradle or Maven
 # wrapper, and a Gradle or Maven of the Image's choosing would only compete
 # with it. Headless because nothing in a Box draws on a screen.
 RUN apt-get update \

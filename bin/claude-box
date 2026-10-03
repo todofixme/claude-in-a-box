@@ -162,11 +162,19 @@ fi
 
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
 
-# docker refuses the duplicate --name on its own, but its message says nothing
-# about Workspaces. If it cannot answer at all, leave the complaining to the
-# `docker run` below.
-if [ -n "$(docker ps --quiet --filter "name=^${box_name}\$" 2>/dev/null)" ]; then
-  die "a Box is already running on $workspace; leave that one first"
-fi
+# docker refuses a Box of the same name on its own, but its message says
+# nothing about Workspaces. If it cannot answer at all, leave the complaining
+# to the `docker run` below.
+case "$(docker ps --all --filter "name=^${box_name}\$" --format '{{.State}}' 2>/dev/null)" in
+  "") ;;
+  running)
+    die "a Box is already running on $workspace; leave that one first"
+    ;;
+  *)
+    # A Box is thrown away when it ends, so one still here has not ended
+    # cleanly. Its Docker data is intact, but only docker can free the name.
+    die "a Box on $workspace did not clean up after itself; remove it with: docker rm $box_name"
+    ;;
+esac
 
 exec "${docker_argv[@]}"

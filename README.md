@@ -135,12 +135,12 @@ The Box's `dockerd` starts before Claude does. Test Containers reach it through
 is not mounted, so nothing Claude starts can see the Host's containers or
 mount Host directories into new ones.
 
-That daemon keeps its images and containers in a Docker volume of its own per
-Workspace, named after the Workspace (`claude-docker-my-service-<digest>`). The
-Postgres image a test pulled is therefore still there in the next Box, and a
-second run of the test starts it instead of downloading it again. The price is
-that each Workspace pays for its images once, and that they do not come from
-the Host's image cache.
+That daemon keeps the Test Container images it pulls in a Docker volume of its
+own per Workspace, named after the Workspace
+(`claude-docker-my-service-<digest>`). The Postgres image a test pulled is
+therefore still there in the next Box, and a second run of the test starts it
+instead of downloading it again. The price is that each Workspace pays for its
+images once, and that they do not come from the Host's image cache.
 
 Because two daemons on one data directory would corrupt it, **only one Box per
 Workspace runs at a time**. A second one is refused:
@@ -151,11 +151,10 @@ claude-box: a Box is already running on /Users/you/projects/my-service; leave th
 
 Boxes on different Workspaces are unaffected and run side by side.
 
-The Image brings no Gradle and no Maven: projects bring their own wrapper, and
-that is the version the build should use. The wrapper's downloads currently
-land in the `claude-home` volume, so they are there for the next Box but shared
-by all Workspaces; proper caches follow in a later version
-([ADR 0003](docs/adr/0003-host-caches-read-only.md)).
+The Image brings no Gradle and no Maven: a Workspace brings its own wrapper,
+and that is the version the build should use. What the wrapper downloads lands
+in the `claude-home` volume for now, so the next Box has it, but every
+Workspace shares the one copy.
 
 ## What persists between Boxes
 
@@ -165,7 +164,7 @@ survive it:
 - `claude-home`, mounted at `/home/claude` and shared by every Box, holds
   Claude's login, settings, memory and session transcripts.
 - `claude-docker-<workspace>-<digest>`, mounted at `/var/lib/docker`, holds
-  one Workspace's Docker images and containers.
+  one Workspace's Test Container images.
 
 To start over with a clean slate, including logging in again:
 
@@ -191,7 +190,9 @@ docker volume rm claude-docker-my-service-1a2b3c4d5e6f
 
 A Box starts as root, long enough for its entrypoint to bring up `dockerd`
 (`/var/log/dockerd.log` inside the Box, if it ever does not), and drops to
-`claude` before Claude or a shell gets to run.
+`claude` before Claude or a shell gets to run. `docker exec` into a running Box
+bypasses that entrypoint and lands as root, so pass `-u claude` when you want
+to see what Claude sees.
 
 Claude Code's auto-updater is switched off through managed settings at
 `/etc/claude-code/managed-settings.json`, so the Box runs the version the Image
@@ -227,7 +228,7 @@ The suite is in three parts:
   settings, JDK, Docker Engine.
 - `tests/box.bats` — real Boxes: the Workspace mount, state surviving a
   restart, separate session histories per Workspace, the Box's own Docker and
-  its per-Workspace image cache, one Box per Workspace. Uses its own home
+  its per-Workspace Docker data, one Box per Workspace. Uses its own home
   volume, so your Claude login is left alone, and throws away the Docker data
   its Boxes leave behind.
 

@@ -33,7 +33,7 @@ leave_workspace() {
   rm -rf "$WORKSPACE"
 }
 
-# The Box name claude-box derives from the current Workspace.
+# The name claude-box gives the Box on the current Workspace.
 workspace_box_name() {
   "$CLAUDE_BOX" --dry-run | sed -n 's/.*--name \([^ ]*\).*/\1/p'
 }
@@ -43,6 +43,19 @@ workspace_docker_volume() {
   "$CLAUDE_BOX" --dry-run | sed -n 's|.*-v \([^ ]*\):/var/lib/docker.*|\1|p'
 }
 
+# A second Workspace next to the one from setup, to compare against. Leave it
+# through leave_other_workspace, which puts us back in $WORKSPACE: a teardown
+# running from a removed directory can no longer tell which Box is ours.
+enter_other_workspace() {
+  OTHER_WORKSPACE="$(make_workspace)"
+  cd "$OTHER_WORKSPACE" || return 1
+}
+
+leave_other_workspace() {
+  cd "$WORKSPACE" || return 1
+  rm -rf "$OTHER_WORKSPACE"
+}
+
 # Throws away the Docker data a Box left behind for the Workspace we are in.
 # Call it from the Workspace, before leaving or removing it.
 forget_docker_volume() {
@@ -50,4 +63,9 @@ forget_docker_volume() {
   volume="$(workspace_docker_volume)"
   [ -n "$volume" ] || return 0
   docker volume rm -f "$volume" >/dev/null 2>&1 || true
+}
+
+# Whether a Box of that name is running.
+box_is_running() {
+  [ -n "$(docker ps --quiet --filter "name=^$1\$")" ]
 }

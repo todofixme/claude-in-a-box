@@ -71,14 +71,12 @@ box_shell() {
   first="$output"
   [ "$(printf '%s\n' "$first" | wc -l | tr -d ' ')" -eq 1 ]
 
-  other="$(make_workspace)"
-  cd "$other"
+  enter_other_workspace
   run box_shell 'claude -p hi >/dev/null 2>&1; ls ~/.claude/projects'
   status_other="$status"
   second="$output"
   forget_docker_volume
-  cd "$WORKSPACE"
-  rm -rf "$other"
+  leave_other_workspace
 
   [ "$status_other" -eq 0 ]
   # The second Workspace added its own directory next to the first one's,
@@ -125,23 +123,21 @@ box_shell() {
   running=$!
 
   for _ in $(seq 60); do
-    [ -n "$(docker ps --quiet --filter "name=^${name}\$")" ] && break
+    box_is_running "$name" && break
     sleep 0.5
   done
-  [ -n "$(docker ps --quiet --filter "name=^${name}\$")" ]
+  box_is_running "$name"
 
   run box_shell 'true'
   refused_status="$status"
   refused_output="$output"
 
-  other="$(make_workspace)"
-  cd "$other"
+  enter_other_workspace
   run box_shell 'echo side by side'
   other_status="$status"
   other_output="$output"
   forget_docker_volume
-  cd "$WORKSPACE"
-  rm -rf "$other"
+  leave_other_workspace
 
   docker rm -f "$name" >/dev/null 2>&1 || true
   wait "$running" 2>/dev/null || true
@@ -150,4 +146,16 @@ box_shell() {
   [[ "$refused_output" == *"a Box is already running on $WORKSPACE"* ]]
   [ "$other_status" -eq 0 ]
   [[ "$other_output" == *"side by side"* ]]
+}
+
+@test "a Box that did not clean up after itself is reported as that, not as a running one" {
+  name="$(workspace_box_name)"
+  docker create --name "$name" "$CLAUDE_BOX_IMAGE" true >/dev/null
+
+  run box_shell 'true'
+  docker rm -f "$name" >/dev/null
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"did not clean up after itself"* ]]
+  [[ "$output" == *"docker rm $name"* ]]
 }

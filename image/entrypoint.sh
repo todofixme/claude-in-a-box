@@ -20,7 +20,7 @@ log() {
 # needs. A Box without it was started for something other than running tests
 # (the test suite does that), so run the command instead of failing on a
 # daemon nobody is going to use: `docker` then says what is missing itself.
-privileged() {
+has_cap_sys_admin() {
   local effective
   effective="$(sed -n 's/^CapEff:[[:space:]]*//p' /proc/self/status)"
   local cap_sys_admin=21
@@ -30,20 +30,19 @@ privileged() {
 start_dockerd() {
   dockerd >>"$DOCKERD_LOG" 2>&1 &
 
-  local waited=0
+  local deadline=$((SECONDS + DOCKERD_TIMEOUT_SECONDS))
   until docker system info >/dev/null 2>&1; do
-    if [ "$waited" -ge "$((DOCKERD_TIMEOUT_SECONDS * 5))" ]; then
+    if [ "$SECONDS" -ge "$deadline" ]; then
       log "dockerd did not come up within ${DOCKERD_TIMEOUT_SECONDS}s, see $DOCKERD_LOG"
       return 1
     fi
     sleep 0.2
-    waited=$((waited + 1))
   done
 }
 
 if [ "$(id -u)" -eq 0 ]; then
-  if privileged; then
-    start_dockerd || true
+  if has_cap_sys_admin; then
+    start_dockerd
   fi
 
   # The terminal docker handed us belongs to root, and Claude's TUI reopens it

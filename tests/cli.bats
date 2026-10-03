@@ -170,10 +170,9 @@ teardown() {
 @test "another Workspace gets another Box name and Docker data volume" {
   here="$(workspace_box_name):$(workspace_docker_volume)"
 
-  other="$(make_workspace)"
-  cd "$other"
+  enter_other_workspace
   there="$(workspace_box_name):$(workspace_docker_volume)"
-  rm -rf "$other"
+  leave_other_workspace
 
   [ "$here" != "$there" ]
 }

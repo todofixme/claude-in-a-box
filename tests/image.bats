@@ -75,7 +75,7 @@ in_box() {
   [ "$output" = "claude:claude" ]
 }
 
-@test "the Image carries a JDK 21, so backend projects can build with their wrapper" {
+@test "the Image carries a JDK 21, so a backend Workspace can build with its wrapper" {
   run in_box java -version
   [ "$status" -eq 0 ]
   [[ "$output" == *'version "21'* ]]
@@ -85,7 +85,7 @@ in_box() {
   [[ "$output" == *" 21"* ]]
 }
 
-@test "the Image brings no Gradle or Maven: projects bring their wrappers" {
+@test "the Image brings no Gradle or Maven: a Workspace brings its own wrapper" {
   run in_box bash -c 'command -v gradle maven mvn'
   [ "$status" -ne 0 ]
 }
