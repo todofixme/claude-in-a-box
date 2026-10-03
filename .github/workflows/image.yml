@@ -1,0 +1,72 @@
+name: Image
+#
+# Builds the Image on every PR (so Renovate automerge has a required check to
+# wait on) and publishes it to GHCR on every push to main, tagged latest,
+# sha-<short> and claude-<version> (the Claude Code version the Dockerfile
+# pins). Runs on a native arm64 runner because the Image only targets arm64.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A PR gaining a new commit while its build is still running makes the old
+# one moot; cancel it rather than wasting a runner on a superseded diff. Never
+# cancel a push to main, though: that build is publishing, and canceling it
+# mid-push could leave GHCR with some of the three tags updated and some not.
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/todofixme/claude-in-a-box
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Read the pinned Claude Code version
+        id: claude
+        run: |
+          version="$(sed -n 's/^ARG CLAUDE_CODE_VERSION=\(.*\)$/\1/p' Dockerfile)"
+          [ -n "$version" ] || { echo "::error::could not read CLAUDE_CODE_VERSION from Dockerfile"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Compute the short commit SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Pull requests only need to prove the Image still builds; nothing is
+      # pushed, so a login would be pointless (and PRs from forks don't get
+      # one anyway).
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags are harmless to compute on a PR too: push stays false, so nothing
+      # is sent anywhere and the tag names never get used.
+      - name: Build, and publish on pushes to main
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:sha-${{ steps.sha.outputs.short }}
+            ${{ env.IMAGE_NAME }}:claude-${{ steps.claude.outputs.version }}

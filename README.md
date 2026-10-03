@@ -170,3 +170,13 @@ The suite is in three parts:
 
 The last two skip themselves unless `claude-in-a-box:dev` is on the Host;
 `CLAUDE_BOX_TEST_IMAGE` points them at another Image.
+
+### Continuous integration
+
+`.github/workflows/image.yml` builds the Image on every pull request against
+`main`, without pushing it, so the build can be a required check before
+Renovate automerges a dependency bump. On every push to `main` it also
+publishes the Image to `ghcr.io/todofixme/claude-in-a-box`, tagged `latest`,
+`sha-<short commit>` and `claude-<version>` — the Claude Code version pinned
+in the `Dockerfile`, so you can pull the Image that has a specific Claude Code
+version without reading a changelog.
