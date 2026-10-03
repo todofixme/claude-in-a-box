@@ -24,10 +24,6 @@ _Avoid_: project, repo, mount
 A container started by Testcontainers inside a Box during backend tests.
 _Avoid_: sidecar, service container
 
-**Host Cache**:
-A build cache of the Host (e.g. Maven, Gradle or npm dependencies) that a Box reuses.
-_Avoid_: shared cache, mount
-
 **Box Cache**:
-A build cache owned by Boxes and shared among them; the Host never reads it.
-_Avoid_: volume, container cache
+A build cache a Box fills and later Boxes on the same Workspace reuse; the Host never reads it, and no cache of the Host's reaches a Box.
+_Avoid_: volume, container cache, host cache

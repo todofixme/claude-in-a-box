@@ -55,7 +55,13 @@ there are none.
   `CLAUDE_BOX_MAVEN_VOLUME`, `CLAUDE_BOX_GRADLE_VOLUME`) are gone. Per-Workspace
   names are derived from the Workspace path, so a test in a temporary
   Workspace gets its own Box Caches without being told.
-- 05 still specifies the Host's npm cache and pnpm store as read-write Host
-  Caches. That is the same question this ticket just answered the other way;
-  whoever picks up 05 should decide it deliberately, not inherit it. The
-  GLOSSARY's **Host Cache** has no referent in the code until then.
+- 05 specified the Host's npm cache and pnpm store as read-write Host Caches,
+  which would have rebuilt the pattern this ticket removed. Its spec now reads
+  the same way as this one: npm cache, pnpm store and the Playwright browser
+  cache are Box Caches of the Workspace. The argument for the exception stays
+  on record in ADR-0003, since npm and pnpm verify their contents against the
+  lockfile hash.
+- With that, nothing in the project has a Host Cache, so the term is out of
+  the GLOSSARY and **Box Cache** says per Workspace rather than shared. The
+  superseded ADR-0003 and ticket 04 still use the old word; they are history
+  and explain themselves.
