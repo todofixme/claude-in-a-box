@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+#
+# claude-box - run Claude Code in YOLO mode inside a Box.
+#
+# Started in a project directory on the Host, it mounts that Workspace into a
+# Box at the same absolute path and hands it to Claude with permission checks
+# switched off. Flags it does not recognise are passed on to Claude.
+
+set -euo pipefail
+
+readonly DEFAULT_IMAGE="ghcr.io/todofixme/claude-in-a-box:latest"
+# Claude's login, settings and session history live in the Box's home
+# directory. One volume shared by every Box keeps them across restarts.
+readonly DEFAULT_HOME_VOLUME="claude-home"
+readonly BOX_HOME="/home/claude"
+
+usage() {
+  cat <<USAGE
+Usage: claude-box [options] [claude arguments...]
+
+Runs Claude Code in YOLO mode inside a Box, on the current directory.
+
+Options:
+  --shell              Open a bash login shell in the Box instead of Claude
+  --no-pull            Use the Image already on the Host instead of pulling
+  --image REF          Image to start the Box from
+                       (default: \$CLAUDE_BOX_IMAGE, else $DEFAULT_IMAGE)
+  --dry-run            Print the docker command instead of running it
+  -h, --help           Show this help
+  --                   Pass everything that follows to Claude
+
+Any other argument is passed to Claude, so \`claude-box --resume\` resumes this
+Workspace's previous session.
+
+Environment:
+  CLAUDE_BOX_IMAGE          Default Image reference
+  CLAUDE_BOX_HOME_VOLUME    Volume holding Claude's login and state
+                            (default: $DEFAULT_HOME_VOLUME)
+USAGE
+}
+
+die() {
+  printf 'claude-box: %s\n' "$1" >&2
+  exit 1
+}
+
+image="${CLAUDE_BOX_IMAGE:-$DEFAULT_IMAGE}"
+pull=1
+shell=0
+dry_run=0
+claude_argv=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --shell)
+      shell=1
+      shift
+      ;;
+    --no-pull)
+      pull=0
+      shift
+      ;;
+    --image)
+      [ $# -ge 2 ] || die "--image needs an Image reference"
+      image="$2"
+      shift 2
+      ;;
+    --image=*)
+      image="${1#--image=}"
+      [ -n "$image" ] || die "--image needs an Image reference"
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      claude_argv+=("$@")
+      break
+      ;;
+    *)
+      claude_argv+=("$1")
+      shift
+      ;;
+  esac
+done
+
+workspace="$(pwd -P)"
+home_volume="${CLAUDE_BOX_HOME_VOLUME:-$DEFAULT_HOME_VOLUME}"
+
+docker_argv=(
+  docker run --rm -i
+  -v "$workspace:$workspace"
+  -v "$home_volume:$BOX_HOME"
+  -w "$workspace"
+)
+
+# Claude needs a terminal, but asking docker for one when there is none to
+# forward makes it refuse to start, so piping into `--shell` stays possible.
+if [ -t 0 ]; then
+  docker_argv+=(-t)
+fi
+
+if [ "$pull" -eq 1 ]; then
+  docker_argv+=(--pull always)
+else
+  # `never` rather than docker's default `missing`, so a typo in --image fails
+  # on the Host with a clear message instead of reaching for a registry.
+  docker_argv+=(--pull never)
+fi
+
+docker_argv+=("$image")
+
+if [ "$shell" -eq 1 ]; then
+  [ ${#claude_argv[@]} -eq 0 ] || die "--shell takes no Claude arguments"
+  docker_argv+=(bash -l)
+else
+  docker_argv+=(claude --dangerously-skip-permissions)
+  [ ${#claude_argv[@]} -eq 0 ] || docker_argv+=("${claude_argv[@]}")
+fi
+
+if [ "$dry_run" -eq 1 ]; then
+  printf '%q ' "${docker_argv[@]}"
+  printf '\n'
+  exit 0
+fi
+
+command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
+
+exec "${docker_argv[@]}"
