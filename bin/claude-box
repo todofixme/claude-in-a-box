@@ -5,6 +5,11 @@
 # Started in a project directory on the Host, it mounts that Workspace into a
 # Box at the same absolute path and hands it to Claude with permission checks
 # switched off. Flags it does not recognise are passed on to Claude.
+#
+# The Box runs privileged and brings up its own dockerd, so Claude can run
+# tests that need Test Containers (ADR-0001). That daemon's data lives in a
+# volume of its own per Workspace, which is why only one Box per Workspace may
+# run: two daemons on one data directory corrupt it.
 
 set -euo pipefail
 
@@ -13,6 +18,7 @@ readonly DEFAULT_IMAGE="ghcr.io/todofixme/claude-in-a-box:latest"
 # directory. One volume shared by every Box keeps them across restarts.
 readonly DEFAULT_HOME_VOLUME="claude-home"
 readonly BOX_HOME="/home/claude"
+readonly BOX_DOCKER_DATA="/var/lib/docker"
 
 usage() {
   cat <<USAGE
@@ -93,10 +99,34 @@ done
 workspace="$(pwd -P)"
 home_volume="${CLAUDE_BOX_HOME_VOLUME:-$DEFAULT_HOME_VOLUME}"
 
+# Both names have to be derivable from the Workspace path alone, so that every
+# start in a Workspace finds the same Docker data again and recognises a Box
+# that Workspace already has running. The basename only makes them readable in
+# `docker ps`; the digest is what keeps two Workspaces apart.
+digest_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256
+  else
+    printf '%s' "$1" | sha256sum
+  fi | cut -c1-12
+}
+
+slug="$(basename "$workspace")"
+# Docker names take letters, digits and _.- only.
+slug="${slug//[^a-zA-Z0-9_.-]/-}"
+workspace_id="$slug-$(digest_of "$workspace")"
+box_name="claude-box-$workspace_id"
+docker_volume="claude-docker-$workspace_id"
+
 docker_argv=(
   docker run --rm -i
+  --name "$box_name"
+  # Needed by the dockerd the Box starts for itself. The Host's Docker socket
+  # is deliberately not mounted: through it Claude could reach the Host.
+  --privileged
   -v "$workspace:$workspace"
   -v "$home_volume:$BOX_HOME"
+  -v "$docker_volume:$BOX_DOCKER_DATA"
   -w "$workspace"
 )
 
@@ -131,5 +161,12 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
+
+# docker refuses the duplicate --name on its own, but its message says nothing
+# about Workspaces. If it cannot answer at all, leave the complaining to the
+# `docker run` below.
+if [ -n "$(docker ps --quiet --filter "name=^${box_name}\$" 2>/dev/null)" ]; then
+  die "a Box is already running on $workspace; leave that one first"
+fi
 
 exec "${docker_argv[@]}"

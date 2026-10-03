@@ -136,3 +136,44 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"claude --dangerously-skip-permissions"* ]]
 }
+
+@test "runs the Box privileged, because its own dockerd needs that" {
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--privileged"* ]]
+}
+
+@test "never mounts the Host's Docker socket into the Box" {
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"docker.sock"* ]]
+}
+
+@test "gives the Workspace its own volume for the Box's Docker data" {
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ -v\ claude-docker-[A-Za-z0-9_.-]+:/var/lib/docker ]]
+}
+
+@test "names the Box after the Workspace" {
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ --name\ claude-box-[A-Za-z0-9_.-]+ ]]
+}
+
+@test "the Box name and Docker data volume are the same on every start in a Workspace" {
+  first="$(workspace_box_name):$(workspace_docker_volume)"
+  second="$(workspace_box_name):$(workspace_docker_volume)"
+  [ "$first" = "$second" ]
+}
+
+@test "another Workspace gets another Box name and Docker data volume" {
+  here="$(workspace_box_name):$(workspace_docker_volume)"
+
+  other="$(make_workspace)"
+  cd "$other"
+  there="$(workspace_box_name):$(workspace_docker_volume)"
+  rm -rf "$other"
+
+  [ "$here" != "$there" ]
+}

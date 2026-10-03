@@ -25,6 +25,9 @@ setup() {
 }
 
 teardown() {
+  # Every Box leaves its Workspace's Docker data behind on purpose; in the
+  # tests that data is throwaway.
+  forget_docker_volume
   leave_workspace
 }
 
@@ -73,6 +76,8 @@ box_shell() {
   run box_shell 'claude -p hi >/dev/null 2>&1; ls ~/.claude/projects'
   status_other="$status"
   second="$output"
+  forget_docker_volume
+  cd "$WORKSPACE"
   rm -rf "$other"
 
   [ "$status_other" -eq 0 ]
@@ -93,4 +98,56 @@ box_shell() {
   run env CLAUDE_BOX_IMAGE="claude-in-a-box:definitely-not-built" \
     "$CLAUDE_BOX" --no-pull --shell
   [ "$status" -ne 0 ]
+}
+
+@test "Claude can use the Box's own Docker, Compose plugin included" {
+  run box_shell 'id -un && docker run --rm hello-world && docker compose version'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claude"* ]]
+  [[ "$output" == *"Hello from Docker!"* ]]
+  [[ "$output" == *"Docker Compose version"* ]]
+}
+
+@test "images pulled in a Box stay in the Workspace's Docker data for the next one" {
+  run box_shell 'docker pull hello-world'
+  [ "$status" -eq 0 ]
+
+  # A second Box: same Workspace, so the same Docker data volume. A Test
+  # Container image is cached the same way, just bigger.
+  run box_shell 'docker image inspect hello-world >/dev/null && echo cached'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cached"* ]]
+}
+
+@test "only one Box per Workspace, while Boxes on other Workspaces run side by side" {
+  name="$(workspace_box_name)"
+  printf 'sleep 60\n' | "$CLAUDE_BOX" --no-pull --shell >/dev/null 2>&1 &
+  running=$!
+
+  for _ in $(seq 60); do
+    [ -n "$(docker ps --quiet --filter "name=^${name}\$")" ] && break
+    sleep 0.5
+  done
+  [ -n "$(docker ps --quiet --filter "name=^${name}\$")" ]
+
+  run box_shell 'true'
+  refused_status="$status"
+  refused_output="$output"
+
+  other="$(make_workspace)"
+  cd "$other"
+  run box_shell 'echo side by side'
+  other_status="$status"
+  other_output="$output"
+  forget_docker_volume
+  cd "$WORKSPACE"
+  rm -rf "$other"
+
+  docker rm -f "$name" >/dev/null 2>&1 || true
+  wait "$running" 2>/dev/null || true
+
+  [ "$refused_status" -ne 0 ]
+  [[ "$refused_output" == *"a Box is already running on $WORKSPACE"* ]]
+  [ "$other_status" -eq 0 ]
+  [[ "$other_output" == *"side by side"* ]]
 }

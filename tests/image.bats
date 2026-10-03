@@ -74,3 +74,35 @@ in_box() {
   [ "$status" -eq 0 ]
   [ "$output" = "claude:claude" ]
 }
+
+@test "the Image carries a JDK 21, so backend projects can build with their wrapper" {
+  run in_box java -version
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'version "21'* ]]
+
+  run in_box javac -version
+  [ "$status" -eq 0 ]
+  [[ "$output" == *" 21"* ]]
+}
+
+@test "the Image brings no Gradle or Maven: projects bring their wrappers" {
+  run in_box bash -c 'command -v gradle maven mvn'
+  [ "$status" -ne 0 ]
+}
+
+@test "the Image carries Docker Engine with the Compose plugin" {
+  run in_box bash -c 'command -v dockerd'
+  [ "$status" -eq 0 ]
+
+  run in_box docker --version
+  [ "$status" -eq 0 ]
+
+  run in_box docker compose version
+  [ "$status" -eq 0 ]
+}
+
+@test "claude is in the docker group, so it can reach the Box's dockerd" {
+  run in_box id -nG
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"docker"* ]]
+}

@@ -20,6 +20,12 @@ route to, and anything in the Workspace can leave over the network. Don't make
 a Workspace of something you would not let Claude read in the first place. See
 [ADR 0002](docs/adr/0002-no-network-firewall.md).
 
+The Box also runs `--privileged`, because it starts a Docker daemon of its own
+for Test Containers. That is a weaker wall than an ordinary container's, but it
+is the Host's Docker socket that would be the real hole, and that one is never
+mounted: an escape from the Box ends in the Linux VM your Docker runs in, not
+on the Host. See [ADR 0001](docs/adr/0001-docker-in-docker-over-host-socket.md).
+
 ## Prerequisites
 
 - Docker (Docker Desktop or Rancher Desktop) running on an arm64 Host
@@ -113,16 +119,65 @@ Gradle dependency caches
 ([ADR 0003](docs/adr/0003-host-caches-read-only.md)); treat the list of mounts
 as something to check, not a guarantee.
 
+## Backend tests with Test Containers
+
+The Box has JDK 21 and a Docker daemon of its own, so Claude can run
+Kotlin/Spring Boot tests that start Test Containers. Nothing needs setting up:
+
+```sh
+cd ~/projects/my-service
+claude-box
+> run the tests
+```
+
+The Box's `dockerd` starts before Claude does. Test Containers reach it through
+`/var/run/docker.sock` **inside** the Box; the Host's socket of the same name
+is not mounted, so nothing Claude starts can see the Host's containers or
+mount Host directories into new ones.
+
+That daemon keeps its images and containers in a Docker volume of its own per
+Workspace, named after the Workspace (`claude-docker-my-service-<digest>`). The
+Postgres image a test pulled is therefore still there in the next Box, and a
+second run of the test starts it instead of downloading it again. The price is
+that each Workspace pays for its images once, and that they do not come from
+the Host's image cache.
+
+Because two daemons on one data directory would corrupt it, **only one Box per
+Workspace runs at a time**. A second one is refused:
+
+```
+claude-box: a Box is already running on /Users/you/projects/my-service; leave that one first
+```
+
+Boxes on different Workspaces are unaffected and run side by side.
+
+The Image brings no Gradle and no Maven: projects bring their own wrapper, and
+that is the version the build should use. The wrapper's downloads currently
+land in the `claude-home` volume, so they are there for the next Box but shared
+by all Workspaces; proper caches follow in a later version
+([ADR 0003](docs/adr/0003-host-caches-read-only.md)).
+
 ## What persists between Boxes
 
-A Box itself is thrown away when you leave it (`docker run --rm`). What
-survives is the `claude-home` volume mounted at `/home/claude`, which holds
-Claude's login, settings, memory and session transcripts.
+A Box itself is thrown away when you leave it (`docker run --rm`). Two volumes
+survive it:
+
+- `claude-home`, mounted at `/home/claude` and shared by every Box, holds
+  Claude's login, settings, memory and session transcripts.
+- `claude-docker-<workspace>-<digest>`, mounted at `/var/lib/docker`, holds
+  one Workspace's Docker images and containers.
 
 To start over with a clean slate, including logging in again:
 
 ```sh
 docker volume rm claude-home
+```
+
+To reclaim the disk a Workspace's Test Container images take:
+
+```sh
+docker volume ls | grep claude-docker
+docker volume rm claude-docker-my-service-1a2b3c4d5e6f
 ```
 
 ## What the Image contains
@@ -131,6 +186,12 @@ docker volume rm claude-home
 - Claude Code, installed from npm at a version pinned in the `Dockerfile`
 - A non-root user `claude` (UID 1000) with passwordless `sudo`, which Claude
   runs as
+- JDK 21, for Kotlin/Spring Boot builds
+- Docker Engine with the Compose plugin, for the daemon the Box runs itself
+
+A Box starts as root, long enough for its entrypoint to bring up `dockerd`
+(`/var/log/dockerd.log` inside the Box, if it ever does not), and drops to
+`claude` before Claude or a shell gets to run.
 
 Claude Code's auto-updater is switched off through managed settings at
 `/etc/claude-code/managed-settings.json`, so the Box runs the version the Image
@@ -163,10 +224,12 @@ The suite is in three parts:
 - `tests/cli.bats` — the `docker run` command `claude-box` assembles, via
   `--dry-run`. Needs neither Docker nor an Image.
 - `tests/image.bats` — the built Image: user, sudo, pinned version, managed
-  settings.
+  settings, JDK, Docker Engine.
 - `tests/box.bats` — real Boxes: the Workspace mount, state surviving a
-  restart, separate session histories per Workspace. Uses its own home volume,
-  so your Claude login is left alone.
+  restart, separate session histories per Workspace, the Box's own Docker and
+  its per-Workspace image cache, one Box per Workspace. Uses its own home
+  volume, so your Claude login is left alone, and throws away the Docker data
+  its Boxes leave behind.
 
 The last two skip themselves unless `claude-in-a-box:dev` is on the Host;
 `CLAUDE_BOX_TEST_IMAGE` points them at another Image.

@@ -32,3 +32,22 @@ leave_workspace() {
   cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$WORKSPACE"
 }
+
+# The Box name claude-box derives from the current Workspace.
+workspace_box_name() {
+  "$CLAUDE_BOX" --dry-run | sed -n 's/.*--name \([^ ]*\).*/\1/p'
+}
+
+# The volume holding the Docker data of this Workspace's Box.
+workspace_docker_volume() {
+  "$CLAUDE_BOX" --dry-run | sed -n 's|.*-v \([^ ]*\):/var/lib/docker.*|\1|p'
+}
+
+# Throws away the Docker data a Box left behind for the Workspace we are in.
+# Call it from the Workspace, before leaving or removing it.
+forget_docker_volume() {
+  local volume
+  volume="$(workspace_docker_volume)"
+  [ -n "$volume" ] || return 0
+  docker volume rm -f "$volume" >/dev/null 2>&1 || true
+}
