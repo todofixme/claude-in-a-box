@@ -6,13 +6,13 @@
 
 **Model:** opus
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] Image builds locally for linux/arm64 from `node:24-trixie`
 - [x] Claude Code version is pinned in one place in the Image definition and the auto-updater is disabled via managed settings
 - [x] Claude runs as non-root user `claude` with passwordless sudo
 - [x] `claude-box` started in a project directory opens Claude in YOLO mode with the Workspace as working directory at its Host path
-- [ ] After logging in once, stopping and restarting the Box keeps the login; `claude-box --resume` finds the project's previous session
+- [x] After logging in once, stopping and restarting the Box keeps the login; `claude-box --resume` finds the project's previous session
 - [x] Two different Workspaces have separate session histories
 - [x] `claude-box --shell` opens bash; `--no-pull` skips pulling; Image reference is overridable
 - [x] README explains prerequisites, putting `claude-box` on the PATH, and the flags
@@ -78,3 +78,13 @@ Findings noted and kept as they are:
   the tests were agreed at, so it stays.
 - The `# renovate:` comment on the version pin belongs to 08. One line, no
   behaviour, and it saves 08 having to find the pin.
+
+### Confirmed
+
+Verified manually on 2026-10-03: logged in once, left the Box, started it
+again, and the login was still there. `claude-box --resume` found the
+Workspace's previous session. That closes the last acceptance criterion, the
+one no agent could check.
+
+All eight criteria are met and this ticket is resolved, which unblocks 02, 03,
+05, 06 and 07.
