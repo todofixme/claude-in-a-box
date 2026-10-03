@@ -42,38 +42,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && usermod --append --groups docker claude
 
-# Maven and Gradle read the Host's dependencies through read-only mounts and
-# write into Box Caches of their own (ADR-0003). The paths are the Image's and
-# claude-box mounts onto them; they exist empty so that a Box started without
-# those mounts still builds, and belong to claude so that docker seeds the Box
-# Cache volumes from them with the right owner.
-#
-# GRADLE_RO_DEP_CACHE names the directory containing modules-2, not modules-2
-# itself. maven.repo.local.tail is Maven 3.9's chained local repository, whose
-# tails are read-only; ignoreAvailability makes Maven use what the tail has
-# even when the Host downloaded it from a remote repository this build does
-# not declare, which is the point of sharing the Host's repository at all.
-# MAVEN_USER_HOME is what the Maven wrapper reads, so its distributions land
-# in the Box Cache instead of the claude-home volume.
-#
-# The same two properties go into MAVEN_ARGS and MAVEN_OPTS because which one
-# a Workspace honours depends on its wrapper: a script-based mvnw reaches
-# Maven's own `mvn`, which reads MAVEN_ARGS, while an mvnw with a
-# maven-wrapper.jar launches Maven itself and passes on only MAVEN_OPTS, where
-# the two -D land as JVM system properties. A build that overwrites MAVEN_OPTS
-# for its own reasons still has MAVEN_ARGS.
-ARG MAVEN_LOCAL_REPOSITORY_ARGS="-Dmaven.repo.local=/box-caches/maven/repository -Dmaven.repo.local.tail=/host-caches/maven/repository -Dmaven.repo.local.tail.ignoreAvailability=true"
-ENV GRADLE_USER_HOME=/box-caches/gradle \
-  GRADLE_RO_DEP_CACHE=/host-caches/gradle \
-  MAVEN_USER_HOME=/box-caches/maven \
-  MAVEN_ARGS="${MAVEN_LOCAL_REPOSITORY_ARGS}" \
-  MAVEN_OPTS="${MAVEN_LOCAL_REPOSITORY_ARGS}"
-RUN mkdir -p \
-    /box-caches/gradle \
-    /box-caches/maven/repository \
-    /host-caches/gradle/modules-2 \
-    /host-caches/maven/repository \
-  && chown -R claude:claude /box-caches /host-caches
+# Maven and Gradle download into ~/.m2 and ~/.gradle, and claude-box mounts a
+# Box Cache of the Workspace onto each (ADR-0004). The two exist here so that
+# docker seeds those volumes with claude as their owner; beyond that the Image
+# configures neither tool, and no cache of the Host's reaches a Box.
+RUN install -d -o claude -g claude /home/claude/.m2 /home/claude/.gradle
 
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && npm cache clean --force

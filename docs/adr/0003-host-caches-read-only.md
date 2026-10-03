@@ -1,5 +1,7 @@
 # Mount Host Caches read-only where the Host executes their contents
 
+**Status:** superseded by [ADR-0004](0004-box-caches-only-per-workspace.md), which stopped mounting the Host's caches altogether.
+
 The Box should reuse dependencies the Host has already downloaded, but must not write into directories whose contents the Host later executes. `~/.m2/repository` and `~/.gradle/caches/modules-2` are therefore mounted read-only; writes go to Box Caches (Gradle via `GRADLE_RO_DEP_CACHE` plus its own `GRADLE_USER_HOME`, Maven via `maven.repo.local.tail`). The npm cache and pnpm store stay read-write because both verify contents against the lockfile hash on read. Parent directories (`~/.gradle`, `~/.m2`) are never mounted, since they contain `init.d/`, `gradle.properties` and `settings.xml` with credentials.
 
 ## Considered Options

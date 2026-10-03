@@ -43,6 +43,13 @@ workspace_docker_volume() {
   "$CLAUDE_BOX" --dry-run | sed -n 's|.*-v \([^ ]*\):/var/lib/docker.*|\1|p'
 }
 
+# Every volume a Box gives the Workspace we are in, one per line: its Docker
+# data and its two Box Caches. The home volume is shared, so not one of them.
+workspace_volumes() {
+  "$CLAUDE_BOX" --dry-run | tr ' ' '\n' |
+    grep -E '^claude-(docker|maven|gradle)-[^:]+:' | cut -d: -f1
+}
+
 # A second Workspace next to the one from setup, to compare against. Leave it
 # through leave_other_workspace, which puts us back in $WORKSPACE: a teardown
 # running from a removed directory can no longer tell which Box is ours.
@@ -56,29 +63,18 @@ leave_other_workspace() {
   rm -rf "$OTHER_WORKSPACE"
 }
 
-# Throws away the Docker data a Box left behind for the Workspace we are in.
-# Call it from the Workspace, before leaving or removing it.
-forget_docker_volume() {
-  local volume
-  volume="$(workspace_docker_volume)"
-  [ -n "$volume" ] || return 0
-  docker volume rm -f "$volume" >/dev/null 2>&1 || true
+# Throws away the Docker data and Box Caches a Box left behind for the
+# Workspace we are in. Call it from the Workspace, before leaving or removing
+# it.
+forget_workspace_volumes() {
+  local volumes
+  volumes="$(workspace_volumes)"
+  [ -n "$volumes" ] || return 0
+  # shellcheck disable=SC2086 # one docker call for all of them
+  docker volume rm -f $volumes >/dev/null 2>&1 || true
 }
 
 # Whether a Box of that name is running.
 box_is_running() {
   [ -n "$(docker ps --quiet --filter "name=^$1\$")" ]
-}
-
-# A throwaway Host home for the Host Caches, so no test reads or writes the
-# developer's own ~/.m2 and ~/.gradle. Remembered in $HOST_HOME. Call from
-# setup, and leave_host_home from teardown.
-enter_host_home() {
-  HOST_HOME="$(make_workspace)"
-  export CLAUDE_BOX_HOST_HOME="$HOST_HOME"
-}
-
-leave_host_home() {
-  unset CLAUDE_BOX_HOST_HOME
-  rm -rf "$HOST_HOME"
 }

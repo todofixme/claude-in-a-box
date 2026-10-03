@@ -177,57 +177,37 @@ teardown() {
   [ "$here" != "$there" ]
 }
 
-@test "mounts the Host's Maven repository and Gradle dependency cache read-only" {
-  run env CLAUDE_BOX_HOST_HOME=/Users/dev "$CLAUDE_BOX" --dry-run
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"-v /Users/dev/.m2/repository:/host-caches/maven/repository:ro"* ]]
-  [[ "$output" == *"-v /Users/dev/.gradle/caches/modules-2:/host-caches/gradle/modules-2:ro"* ]]
-}
-
-@test "never mounts the Host's ~/.m2 or ~/.gradle themselves, which hold credentials" {
-  run env CLAUDE_BOX_HOST_HOME=/Users/dev "$CLAUDE_BOX" --dry-run
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"-v /Users/dev/.m2:"* ]]
-  [[ "$output" != *"-v /Users/dev/.gradle:"* ]]
-  [[ "$output" != *"/Users/dev/.gradle/caches:"* ]]
-}
-
-@test "reads the Host Caches out of the Host's home directory by default" {
+@test "gives the Workspace its own Box Caches for Maven and Gradle" {
   run "$CLAUDE_BOX" --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"-v $HOME/.m2/repository:"* ]]
-  [[ "$output" == *"-v $HOME/.gradle/caches/modules-2:"* ]]
+  [[ "$output" =~ -v\ claude-maven-[A-Za-z0-9_.-]+:/home/claude/\.m2 ]]
+  [[ "$output" =~ -v\ claude-gradle-[A-Za-z0-9_.-]+:/home/claude/\.gradle ]]
 }
 
-@test "gives Maven and Gradle Box Caches shared by every Box" {
+@test "mounts nothing of the Host's home, so its Maven and Gradle caches stay out" {
   run "$CLAUDE_BOX" --dry-run
   [ "$status" -eq 0 ]
-  [[ "$output" == *"-v claude-maven:/box-caches/maven"* ]]
-  [[ "$output" == *"-v claude-gradle:/box-caches/gradle"* ]]
+  [[ "$output" != *"-v $HOME/.m2"* ]]
+  [[ "$output" != *"-v $HOME/.gradle"* ]]
+  [[ "$output" != *":ro"* ]]
 }
 
-@test "CLAUDE_BOX_MAVEN_VOLUME and CLAUDE_BOX_GRADLE_VOLUME override the Box Caches" {
-  run env CLAUDE_BOX_MAVEN_VOLUME=other-maven CLAUDE_BOX_GRADLE_VOLUME=other-gradle \
-    "$CLAUDE_BOX" --dry-run
+@test "the Box Caches are the same on every start in a Workspace, and another Workspace's are not" {
+  here="$(workspace_volumes)"
+  [ "$(printf '%s\n' "$here" | wc -l | tr -d ' ')" -eq 3 ]
+  [ "$here" = "$(workspace_volumes)" ]
+
+  enter_other_workspace
+  there="$(workspace_volumes)"
+  leave_other_workspace
+
+  [ "$here" != "$there" ]
+}
+
+@test "--help documents no cache settings, because there are none to make" {
+  run "$CLAUDE_BOX" --help
   [ "$status" -eq 0 ]
-  [[ "$output" == *"-v other-maven:/box-caches/maven"* ]]
-  [[ "$output" == *"-v other-gradle:/box-caches/gradle"* ]]
-  [[ "$output" != *"-v claude-maven:"* ]]
-  [[ "$output" != *"-v claude-gradle:"* ]]
-}
-
-@test "an empty CLAUDE_BOX_HOST_HOME fails instead of sharing the Host's caches" {
-  run env CLAUDE_BOX_HOST_HOME= "$CLAUDE_BOX" --dry-run
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"no Host home directory"* ]]
-  [[ "$output" != *"$HOME/.m2/repository"* ]]
-}
-
-@test "--dry-run creates nothing in the Host's home directory" {
-  host_home="$(make_workspace)"
-  run env CLAUDE_BOX_HOST_HOME="$host_home" "$CLAUDE_BOX" --dry-run
-  [ "$status" -eq 0 ]
-  [ ! -e "$host_home/.m2" ]
-  [ ! -e "$host_home/.gradle" ]
-  rm -rf "$host_home"
+  [[ "$output" != *"HOST_HOME"* ]]
+  [[ "$output" != *"MAVEN"* ]]
+  [[ "$output" != *"GRADLE"* ]]
 }

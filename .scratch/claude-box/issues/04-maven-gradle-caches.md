@@ -131,3 +131,12 @@ Which puts the two projects on two different axes:
 
 Nothing blocks 05, which only needs the Host Cache pattern this ticket
 establishes.
+
+### Superseded
+
+09 reversed the sharing half of this ticket: the Host's caches are no longer
+mounted at all, and Maven and Gradle download into a Box Cache per Workspace.
+What this ticket built is history, including its read-only mounts, its
+`GRADLE_RO_DEP_CACHE`/`maven.repo.local.tail` machinery and the three
+environment variables; ADR-0003 is superseded by ADR-0004. The findings above
+are what argued for the reversal, so they stay.

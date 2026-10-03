@@ -11,8 +11,9 @@
 # volume of its own per Workspace, which is why only one Box per Workspace may
 # run: two daemons on one data directory corrupt it.
 #
-# A backend build in the Box reads the Host's Maven and Gradle dependencies
-# through read-only mounts and writes into Box Caches of its own (ADR-0003).
+# A backend build downloads its dependencies into the Box, where one Box Cache
+# per Workspace keeps them for the next Box. Nothing of the Host's own caches
+# is mounted (ADR-0004).
 
 set -euo pipefail
 
@@ -20,19 +21,13 @@ readonly DEFAULT_IMAGE="ghcr.io/todofixme/claude-in-a-box:latest"
 # Claude's login, settings and session history live in the Box's home
 # directory. One volume shared by every Box keeps them across restarts.
 readonly DEFAULT_HOME_VOLUME="claude-home"
-# Maven and Gradle download the same dependencies for every Workspace, so
-# their Box Caches are shared by every Box too.
-readonly DEFAULT_MAVEN_VOLUME="claude-maven"
-readonly DEFAULT_GRADLE_VOLUME="claude-gradle"
 readonly BOX_HOME="/home/claude"
 readonly BOX_DOCKER_DATA="/var/lib/docker"
-# Where the Image expects the caches, as paths in the Box: its GRADLE_* and
-# MAVEN_* variables point Gradle and Maven at these, and this script is what
-# fills them.
-readonly BOX_HOST_CACHE_MAVEN="/host-caches/maven/repository"
-readonly BOX_HOST_CACHE_GRADLE="/host-caches/gradle/modules-2"
-readonly BOX_CACHE_MAVEN="/box-caches/maven"
-readonly BOX_CACHE_GRADLE="/box-caches/gradle"
+# Maven and Gradle put everything they download under these two, dependencies
+# and wrapper distributions alike, so a Box Cache mounted on each is the whole
+# mechanism: the Image configures neither tool.
+readonly BOX_CACHE_MAVEN="$BOX_HOME/.m2"
+readonly BOX_CACHE_GRADLE="$BOX_HOME/.gradle"
 
 usage() {
   cat <<USAGE
@@ -56,13 +51,6 @@ Environment:
   CLAUDE_BOX_IMAGE          Default Image reference
   CLAUDE_BOX_HOME_VOLUME    Volume holding Claude's login and state
                             (default: $DEFAULT_HOME_VOLUME)
-  CLAUDE_BOX_HOST_HOME      Host home directory the Maven and Gradle Host
-                            Caches are read from; point it at an empty
-                            directory to share neither (default: \$HOME)
-  CLAUDE_BOX_MAVEN_VOLUME   Box Cache volume for Maven's local repository
-                            (default: $DEFAULT_MAVEN_VOLUME)
-  CLAUDE_BOX_GRADLE_VOLUME  Box Cache volume for Gradle's user home
-                            (default: $DEFAULT_GRADLE_VOLUME)
 USAGE
 }
 
@@ -119,23 +107,11 @@ done
 
 workspace="$(pwd -P)"
 home_volume="${CLAUDE_BOX_HOME_VOLUME:-$DEFAULT_HOME_VOLUME}"
-maven_volume="${CLAUDE_BOX_MAVEN_VOLUME:-$DEFAULT_MAVEN_VOLUME}"
-gradle_volume="${CLAUDE_BOX_GRADLE_VOLUME:-$DEFAULT_GRADLE_VOLUME}"
 
-# Only these two leaves of the Host's home directory are mounted, never their
-# parents: ~/.m2 and ~/.gradle hold settings.xml, gradle.properties and
-# init.d, which carry credentials and run code (ADR-0003).
-# `-` and not `:-`, so an empty CLAUDE_BOX_HOST_HOME does not quietly fall
-# back to $HOME and share the caches it was set to keep out of the Box.
-host_home="${CLAUDE_BOX_HOST_HOME-${HOME:-}}"
-[ -n "$host_home" ] || die "no Host home directory: set CLAUDE_BOX_HOST_HOME or HOME"
-host_maven_repository="$host_home/.m2/repository"
-host_gradle_modules="$host_home/.gradle/caches/modules-2"
-
-# Both names have to be derivable from the Workspace path alone, so that every
-# start in a Workspace finds the same Docker data again and recognises a Box
-# that Workspace already has running. The basename only makes them readable in
-# `docker ps`; the digest is what keeps two Workspaces apart.
+# Every name has to be derivable from the Workspace path alone, so that each
+# start in a Workspace finds the same Docker data and Box Caches again and
+# recognises a Box that Workspace already has running. The basename only makes
+# them readable in `docker ps`; the digest is what keeps two Workspaces apart.
 digest_of() {
   if command -v shasum >/dev/null 2>&1; then
     printf '%s' "$1" | shasum -a 256
@@ -150,6 +126,8 @@ slug="${slug//[^a-zA-Z0-9_.-]/-}"
 workspace_id="$slug-$(digest_of "$workspace")"
 box_name="claude-box-$workspace_id"
 docker_volume="claude-docker-$workspace_id"
+maven_volume="claude-maven-$workspace_id"
+gradle_volume="claude-gradle-$workspace_id"
 
 docker_argv=(
   docker run --rm -i
@@ -160,11 +138,8 @@ docker_argv=(
   -v "$workspace:$workspace"
   -v "$home_volume:$BOX_HOME"
   -v "$docker_volume:$BOX_DOCKER_DATA"
-  # Read-only, because the Host executes what its caches contain and neither
-  # Maven nor Gradle verifies an entry it already has (ADR-0003). What the
-  # Box downloads itself goes into the two Box Caches beside them.
-  -v "$host_maven_repository:$BOX_HOST_CACHE_MAVEN:ro"
-  -v "$host_gradle_modules:$BOX_HOST_CACHE_GRADLE:ro"
+  # Nested inside the home volume above; docker mounts the deeper paths last,
+  # so each Box Cache wins over what the home volume holds there.
   -v "$maven_volume:$BOX_CACHE_MAVEN"
   -v "$gradle_volume:$BOX_CACHE_GRADLE"
   -w "$workspace"
@@ -201,14 +176,6 @@ if [ "$dry_run" -eq 1 ]; then
 fi
 
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
-
-# A Host that has never run Maven or Gradle has no cache to share, which is no
-# reason not to start. docker would create the missing bind source itself, but
-# as root; created here it stays the developer's own directory, and empty is
-# all Maven and Gradle need it to be.
-for directory in "$host_maven_repository" "$host_gradle_modules"; do
-  mkdir -p "$directory" || die "cannot create the Host Cache directory $directory"
-done
 
 # docker refuses a Box of the same name on its own, but its message says
 # nothing about Workspaces. If it cannot answer at all, leave the complaining
