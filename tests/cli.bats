@@ -176,3 +176,58 @@ teardown() {
 
   [ "$here" != "$there" ]
 }
+
+@test "mounts the Host's Maven repository and Gradle dependency cache read-only" {
+  run env CLAUDE_BOX_HOST_HOME=/Users/dev "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-v /Users/dev/.m2/repository:/host-caches/maven/repository:ro"* ]]
+  [[ "$output" == *"-v /Users/dev/.gradle/caches/modules-2:/host-caches/gradle/modules-2:ro"* ]]
+}
+
+@test "never mounts the Host's ~/.m2 or ~/.gradle themselves, which hold credentials" {
+  run env CLAUDE_BOX_HOST_HOME=/Users/dev "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"-v /Users/dev/.m2:"* ]]
+  [[ "$output" != *"-v /Users/dev/.gradle:"* ]]
+  [[ "$output" != *"/Users/dev/.gradle/caches:"* ]]
+}
+
+@test "reads the Host Caches out of the Host's home directory by default" {
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-v $HOME/.m2/repository:"* ]]
+  [[ "$output" == *"-v $HOME/.gradle/caches/modules-2:"* ]]
+}
+
+@test "gives Maven and Gradle Box Caches shared by every Box" {
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-v claude-maven:/box-caches/maven"* ]]
+  [[ "$output" == *"-v claude-gradle:/box-caches/gradle"* ]]
+}
+
+@test "CLAUDE_BOX_MAVEN_VOLUME and CLAUDE_BOX_GRADLE_VOLUME override the Box Caches" {
+  run env CLAUDE_BOX_MAVEN_VOLUME=other-maven CLAUDE_BOX_GRADLE_VOLUME=other-gradle \
+    "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-v other-maven:/box-caches/maven"* ]]
+  [[ "$output" == *"-v other-gradle:/box-caches/gradle"* ]]
+  [[ "$output" != *"-v claude-maven:"* ]]
+  [[ "$output" != *"-v claude-gradle:"* ]]
+}
+
+@test "an empty CLAUDE_BOX_HOST_HOME fails instead of sharing the Host's caches" {
+  run env CLAUDE_BOX_HOST_HOME= "$CLAUDE_BOX" --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no Host home directory"* ]]
+  [[ "$output" != *"$HOME/.m2/repository"* ]]
+}
+
+@test "--dry-run creates nothing in the Host's home directory" {
+  host_home="$(make_workspace)"
+  run env CLAUDE_BOX_HOST_HOME="$host_home" "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [ ! -e "$host_home/.m2" ]
+  [ ! -e "$host_home/.gradle" ]
+  rm -rf "$host_home"
+}

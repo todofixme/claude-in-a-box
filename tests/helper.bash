@@ -69,3 +69,16 @@ forget_docker_volume() {
 box_is_running() {
   [ -n "$(docker ps --quiet --filter "name=^$1\$")" ]
 }
+
+# A throwaway Host home for the Host Caches, so no test reads or writes the
+# developer's own ~/.m2 and ~/.gradle. Remembered in $HOST_HOME. Call from
+# setup, and leave_host_home from teardown.
+enter_host_home() {
+  HOST_HOME="$(make_workspace)"
+  export CLAUDE_BOX_HOST_HOME="$HOST_HOME"
+}
+
+leave_host_home() {
+  unset CLAUDE_BOX_HOST_HOME
+  rm -rf "$HOST_HOME"
+}

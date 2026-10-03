@@ -10,3 +10,5 @@ The Box should reuse dependencies the Host has already downloaded, but must not 
 ## Consequences
 
 `~/.gradle/wrapper/dists` and the Playwright browser cache are not mounted from the Host: the Host executes wrapper distributions directly, and the Host's Playwright cache holds macOS builds under the same names Linux expects.
+
+The read-only mount stops builds and accidents, not a deliberate attempt: the Box is privileged (ADR-0001) and `claude` has passwordless `sudo`, so `mount -o remount,rw` inside the Box makes the Host's cache writable again. CAP_SYS_ADMIN is what dockerd needs and what remounting needs, so the two cannot be had separately. Anything stronger would mean not mounting the Host's caches at all.

@@ -106,3 +106,44 @@ in_box() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"docker"* ]]
 }
+
+@test "the Image points Gradle at a Box Cache of its own and at the Host's cache read-only" {
+  run in_box printenv GRADLE_USER_HOME
+  [ "$status" -eq 0 ]
+  [ "$output" = "/box-caches/gradle" ]
+
+  # GRADLE_RO_DEP_CACHE names the directory *containing* modules-2.
+  run in_box printenv GRADLE_RO_DEP_CACHE
+  [ "$status" -eq 0 ]
+  [ "$output" = "/host-caches/gradle" ]
+}
+
+@test "the Image points Maven at a Box Cache of its own with the Host's repository as tail" {
+  # Both variables, because which one a Workspace's wrapper honours depends on
+  # its vintage; the Dockerfile says which does what.
+  for variable in MAVEN_ARGS MAVEN_OPTS; do
+    run in_box printenv "$variable"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"-Dmaven.repo.local=/box-caches/maven/repository"* ]]
+    [[ "$output" == *"-Dmaven.repo.local.tail=/host-caches/maven/repository"* ]]
+  done
+
+  # Keeps the Maven wrapper's distributions out of the claude-home volume.
+  run in_box printenv MAVEN_USER_HOME
+  [ "$status" -eq 0 ]
+  [ "$output" = "/box-caches/maven" ]
+}
+
+@test "the cache directories exist and belong to claude, so the Box Caches seed correctly" {
+  # Every level, not just the leaves: docker seeds an empty volume from the
+  # directory it is mounted on, owner included, and the Maven wrapper writes
+  # its distributions next to the local repository.
+  run in_box find /box-caches /host-caches \( ! -user claude -o ! -group claude \)
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  run in_box stat -c '%n' \
+    /box-caches/maven/repository /box-caches/gradle \
+    /host-caches/maven/repository /host-caches/gradle/modules-2
+  [ "$status" -eq 0 ]
+}

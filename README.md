@@ -87,10 +87,13 @@ claude-box -- --shell
 | `--dry-run`   | Print the `docker run` command instead of running it               |
 | `--help`      | Show usage                                                         |
 
-| Variable                 | Effect                                                 |
-| ------------------------ | ------------------------------------------------------ |
-| `CLAUDE_BOX_IMAGE`       | Default Image reference                                |
-| `CLAUDE_BOX_HOME_VOLUME` | Volume holding Claude's login and state                |
+| Variable                   | Effect                                                   |
+| -------------------------- | -------------------------------------------------------- |
+| `CLAUDE_BOX_IMAGE`         | Default Image reference                                  |
+| `CLAUDE_BOX_HOME_VOLUME`   | Volume holding Claude's login and state                  |
+| `CLAUDE_BOX_HOST_HOME`     | Home directory the Host Caches are read from (see below) |
+| `CLAUDE_BOX_MAVEN_VOLUME`  | Box Cache volume for Maven's local repository            |
+| `CLAUDE_BOX_GRADLE_VOLUME` | Box Cache volume for Gradle's user home                  |
 
 `--image` overrides `CLAUDE_BOX_IMAGE`. A second home volume gives you a
 second, separate Claude login.
@@ -112,12 +115,10 @@ working directory's path. Two Workspaces therefore keep two separate histories,
 and `claude-box --resume` in a Workspace finds that Workspace's last session
 rather than some other Workspace's.
 
-As things stand the Workspace is the only thing mounted from the Host, so your
-SSH keys, the rest of your home directory and your shell configuration are not
-visible in the Box. Later versions add read-only mounts of the Host's Maven and
-Gradle dependency caches
-([ADR 0003](docs/adr/0003-host-caches-read-only.md)); treat the list of mounts
-as something to check, not a guarantee.
+Besides the Workspace, two directories of your home come along, both read-only
+and both build caches: the Maven repository and the Gradle dependency cache
+(see below). Your SSH keys, the rest of your home directory and your shell
+configuration are not visible in the Box.
 
 ## Backend tests with Test Containers
 
@@ -152,19 +153,74 @@ claude-box: a Box is already running on /Users/you/projects/my-service; leave th
 Boxes on different Workspaces are unaffected and run side by side.
 
 The Image brings no Gradle and no Maven: a Workspace brings its own wrapper,
-and that is the version the build should use. What the wrapper downloads lands
-in the `claude-home` volume for now, so the next Box has it, but every
-Workspace shares the one copy.
+and that is the version the build should use. Where the wrapper and the build
+get their dependencies is the next section.
+
+## The Host's Maven and Gradle caches
+
+A build in a Box reuses the dependencies your Host has already downloaded
+rather than fetching them again, and cannot change them. Two directories are
+bind-mounted **read-only**:
+
+| On the Host                  | In the Box                        |
+| ---------------------------- | --------------------------------- |
+| `~/.m2/repository`           | `/host-caches/maven/repository`   |
+| `~/.gradle/caches/modules-2` | `/host-caches/gradle/modules-2`   |
+
+Their parents stay outside: `~/.m2/settings.xml` and `~/.gradle/gradle.properties`
+hold credentials, and `~/.gradle/init.d` holds scripts Gradle runs. Read-only is
+what [ADR 0003](docs/adr/0003-host-caches-read-only.md) is about — neither Maven
+nor Gradle re-verifies a cache entry it already has, so a jar swapped in the Box
+would run in your next build on the Host.
+
+Read-only here means what a build can do, not what the Box can do: it is
+privileged and Claude has `sudo`, so `mount -o remount,rw` inside the Box makes
+those two directories writable again. The capability dockerd needs is the
+capability remounting needs, so this is the price of Test Containers in a Box
+(ADR 0001); if you would rather not pay it, point `CLAUDE_BOX_HOST_HOME` at an
+empty directory and let Boxes download their own dependencies.
+
+What a build downloads for itself goes into two **Box Caches**, volumes shared
+by every Box:
+
+- `claude-gradle` at `/box-caches/gradle` is Gradle's user home: its own
+  dependency cache and the wrapper's Gradle distributions.
+- `claude-maven` at `/box-caches/maven` holds Maven's local repository and the
+  wrapper's Maven distributions.
+
+So a dependency your Host has is read straight out of the Host Cache and never
+copied, and one it does not have is downloaded once and then found by the next
+Box.
+
+Two things to expect:
+
+- Gradle only reuses Host entries whose metadata the same Gradle generation
+  wrote (`caches/modules-2/metadata-2.107` and its siblings). A Box running
+  Gradle 8 does not see what Gradle 9 resolved on the Host; it downloads those
+  into the Box Cache instead.
+- Maven reuses the Host's repository through `maven.repo.local.tail`, which
+  Maven 3.9 introduced. A Workspace whose wrapper pins something older still
+  writes into the Box Cache, but downloads everything itself.
+- A Host that has never run Maven or Gradle gets the two directories created,
+  empty, on the first `claude-box`. Nothing else in `~/.m2` or `~/.gradle` is
+  touched.
+
+`CLAUDE_BOX_HOST_HOME` points the two mounts at a home directory other than
+yours. Pointing it at an empty directory is how you share neither cache: the
+two mounts are then empty directories created inside it, and a build in the
+Box downloads everything into the Box Caches.
 
 ## What persists between Boxes
 
-A Box itself is thrown away when you leave it (`docker run --rm`). Two volumes
+A Box itself is thrown away when you leave it (`docker run --rm`). Four volumes
 survive it:
 
 - `claude-home`, mounted at `/home/claude` and shared by every Box, holds
   Claude's login, settings, memory and session transcripts.
 - `claude-docker-<workspace>-<digest>`, mounted at `/var/lib/docker`, holds
   one Workspace's Test Container images.
+- `claude-gradle` and `claude-maven`, the Box Caches of the section above,
+  shared by every Box.
 
 To start over with a clean slate, including logging in again:
 
@@ -177,6 +233,12 @@ To reclaim the disk a Workspace's Test Container images take:
 ```sh
 docker volume ls | grep claude-docker
 docker volume rm claude-docker-my-service-1a2b3c4d5e6f
+```
+
+To make the next build download its dependencies again:
+
+```sh
+docker volume rm claude-gradle claude-maven
 ```
 
 ## What the Image contains
@@ -225,12 +287,13 @@ The suite is in three parts:
 - `tests/cli.bats` — the `docker run` command `claude-box` assembles, via
   `--dry-run`. Needs neither Docker nor an Image.
 - `tests/image.bats` — the built Image: user, sudo, pinned version, managed
-  settings, JDK, Docker Engine.
+  settings, JDK, Docker Engine, where it points Maven and Gradle.
 - `tests/box.bats` — real Boxes: the Workspace mount, state surviving a
   restart, separate session histories per Workspace, the Box's own Docker and
-  its per-Workspace Docker data, one Box per Workspace. Uses its own home
-  volume, so your Claude login is left alone, and throws away the Docker data
-  its Boxes leave behind.
+  its per-Workspace Docker data, one Box per Workspace, and the Host Caches
+  being readable but not writable. Uses its own home volume, Box Caches and a
+  throwaway Host home, so your Claude login and your real caches are left
+  alone, and throws away the Docker data its Boxes leave behind.
 
 The last two skip themselves unless `claude-in-a-box:dev` is on the Host;
 `CLAUDE_BOX_TEST_IMAGE` points them at another Image.
