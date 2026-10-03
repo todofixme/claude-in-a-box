@@ -8,14 +8,14 @@ Human steps: create the GitHub repo, push, make the GHCR package public, and ena
 
 **Model:** sonnet
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] Workflow builds on PRs without pushing
 - [x] Workflow builds and pushes on every push to `main` with the three tags
 - [x] `claude-<version>` tag matches the Claude Code version pinned in the Image definition
-- [ ] GHCR package is public and pullable without login
+- [x] GHCR package is public and pullable without login
 - [x] `claude-box` defaults to the GHCR Image
-- [ ] PR build is a required status check on `main`
+- [x] PR build is a required status check on `main`
 
 ## Comments
 
@@ -76,3 +76,24 @@ Findings noted and kept as they are:
   builds, and the README section is the only place a developer would learn
   the Image now comes from CI at all — ticket 01 set the precedent of
   updating the README alongside behaviour it introduces.
+
+### Confirmed
+
+Verified on 2026-10-03 after the repo was pushed to GitHub and the workflow
+ran:
+
+- `docker pull` succeeds for `ghcr.io/todofixme/claude-in-a-box:latest` right
+  after `docker logout ghcr.io` — the package is public.
+- GHCR's anonymous tag listing for the package shows `latest`,
+  `sha-8b882da`, `sha-fc76900` and `claude-2.1.288` — all three tag shapes
+  present, and the `claude-` tag matches the version this ticket's Dockerfile
+  pins.
+- The GitHub Actions run history shows two `pull_request` runs (both
+  Renovate PRs) that completed without publishing, and two `push` runs on
+  `main` that completed and published — the PR/push split works as designed.
+- The human confirmed branch protection on `main` has "Require a pull
+  request before merging" and "Require status checks to pass before
+  merging" active, with `build` (the workflow's job, shown as `Image /
+  build`) as the required check.
+
+All six criteria are met and this ticket is resolved, which unblocks 08.
