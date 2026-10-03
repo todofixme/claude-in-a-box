@@ -6,12 +6,12 @@
 
 **Model:** opus
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] A Gradle build in the Box resolves dependencies present on the Host without downloading them
 - [x] A Maven build in the Box resolves dependencies present on the Host without downloading them
 - [x] Dependencies missing on the Host are downloaded into a Box Cache and reused by the next Box
-- [ ] The Box cannot write into the Host's Maven repository or Gradle cache
+- [x] The Box cannot write into the Host's Maven repository or Gradle cache
 - [x] `~/.gradle/init.d`, `gradle.properties`, `settings.xml` and wrapper dists of the Host are not visible in the Box
 - [x] A missing Host cache directory is created empty and the Box starts normally
 
@@ -94,17 +94,40 @@ Findings noted and kept as they are:
   touch a developer's real `~/.m2` and `~/.gradle`, and nothing else gives it
   a Host home and Box Caches of its own.
 
-### Open for the human
+### The fourth criterion, decided against agentbox
 
-Five criteria are met. The fourth — "The Box cannot write into the Host's
-Maven repository or Gradle cache" — is true of every build and of anything
-Claude does by accident, and false against a deliberate `sudo mount -o
-remount,rw`. The limit is now recorded in ADR-0003 and the README rather than
-papered over, and the decision is yours:
+"The Box cannot write into the Host's Maven repository or Gradle cache" is
+true of every build and of anything Claude does by accident, and false against
+a deliberate `sudo mount -o remount,rw` in a privileged Box. The human's call
+was that this project need not be stricter here than
+[agentbox](https://github.com/fletchgqc/agentbox), a sandbox with the same
+purpose, so the criterion is accepted as met and the limit stays recorded in
+ADR-0003 and the README.
 
-- accept it as the price of a privileged Box and tick the box, or
-- have the Host's caches not mounted at all by default, with
-  `CLAUDE_BOX_HOST_HOME` as the opt-in rather than the opt-out.
+What agentbox does, read from its sources:
 
-Nothing else blocks 05, which only needs the Host Cache pattern this ticket
+- It never mounts the developer's `~/.m2` or `~/.gradle`. It creates
+  `~/.cache/agentbox/<container>/{npm,pip,maven,gradle}` on the Host and mounts
+  those **read-write** onto `/home/agent/.m2`, `/home/agent/.gradle` and the
+  npm and pip caches (`agentbox:327-336`).
+- So nothing the agent writes is ever read by a build on the Host — and nothing
+  the Host has already downloaded is reused either. Each container name pays
+  for its own dependencies once.
+- Its container is weaker than a Box: no `--privileged`, no added
+  capabilities, no dockerd of its own. The runtime user has passwordless sudo
+  (`Dockerfile:87`), but without CAP_SYS_ADMIN a `remount` cannot succeed
+  there. Docker is reachable only through `--dangerously-mount-docker`, which
+  mounts the Host's socket on Docker Desktop and is refused on native Linux and
+  Podman.
+
+Which puts the two projects on two different axes:
+
+- On what a mounted cache allows: agentbox mounts its caches read-write with no
+  protection at all; a Box mounts the Host's read-only. **A Box is stricter.**
+- On whether the Host's own caches are in the sandbox: agentbox sidesteps the
+  question by not sharing them, at the price of no reuse. That is exactly the
+  "Box Caches only" option ADR-0003 weighed and rejected, so matching it would
+  mean giving up what this ticket is for.
+
+Nothing blocks 05, which only needs the Host Cache pattern this ticket
 establishes.

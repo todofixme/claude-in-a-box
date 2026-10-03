@@ -5,7 +5,7 @@ The Box should reuse dependencies the Host has already downloaded, but must not 
 ## Considered Options
 
 - **Host Caches read-write**: maximum reuse, but Maven and Gradle do not re-verify existing cache entries, so a swapped JAR would run in the Host's next build. Gradle also does not support several machines writing to the same cache concurrently.
-- **Box Caches only**: safe, but every new Box downloads everything again.
+- **Box Caches only**: safe, but every new Box downloads everything again. This is what [agentbox](https://github.com/fletchgqc/agentbox) does, which mounts per-container caches read-write and shares nothing of the Host's.
 
 ## Consequences
 
