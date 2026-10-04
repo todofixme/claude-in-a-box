@@ -225,3 +225,54 @@ teardown() {
   [[ "$output" != *"PNPM"* ]]
   [[ "$output" != *"PLAYWRIGHT"* ]]
 }
+
+@test "passes the Host's Git identity to the Box, read from Git config" {
+  config="$(mktemp)"
+  GIT_CONFIG_GLOBAL="$config" git config --global user.name "TestDeveloper"
+  GIT_CONFIG_GLOBAL="$config" git config --global user.email "test@example.com"
+
+  GIT_CONFIG_GLOBAL="$config" run "$CLAUDE_BOX" --dry-run
+  rm -f "$config"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-e GIT_AUTHOR_NAME=TestDeveloper"* ]]
+  [[ "$output" == *"-e GIT_COMMITTER_NAME=TestDeveloper"* ]]
+  [[ "$output" == *"-e GIT_AUTHOR_EMAIL=test@example.com"* ]]
+  [[ "$output" == *"-e GIT_COMMITTER_EMAIL=test@example.com"* ]]
+}
+
+@test "does not pass a Git identity to the Box when Git has none configured" {
+  missing_config="$(mktemp -u)"
+  GIT_CONFIG_GLOBAL="$missing_config" GIT_CONFIG_NOSYSTEM=1 run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"GIT_AUTHOR_NAME"* ]]
+  [[ "$output" != *"GIT_AUTHOR_EMAIL"* ]]
+  [[ "$output" != *"GIT_COMMITTER_NAME"* ]]
+  [[ "$output" != *"GIT_COMMITTER_EMAIL"* ]]
+}
+
+@test "passes CLAUDE_BOX_GH_TOKEN into the Box as GH_TOKEN, which gh reads directly" {
+  CLAUDE_BOX_GH_TOKEN=a-github-token run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-e GH_TOKEN=a-github-token"* ]]
+}
+
+@test "passes CLAUDE_BOX_GITLAB_TOKEN into the Box as GITLAB_TOKEN, which glab reads directly" {
+  CLAUDE_BOX_GITLAB_TOKEN=a-gitlab-token run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-e GITLAB_TOKEN=a-gitlab-token"* ]]
+}
+
+@test "no GitHub or GitLab token env var exists in the Box when neither is set on the Host" {
+  unset CLAUDE_BOX_GH_TOKEN CLAUDE_BOX_GITLAB_TOKEN
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"GH_TOKEN"* ]]
+  [[ "$output" != *"GITLAB_TOKEN"* ]]
+}
+
+@test "--help documents the GitHub and GitLab token variables" {
+  run "$CLAUDE_BOX" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CLAUDE_BOX_GH_TOKEN"* ]]
+  [[ "$output" == *"CLAUDE_BOX_GITLAB_TOKEN"* ]]
+}

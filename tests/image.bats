@@ -111,6 +111,11 @@ in_box() {
   [[ "$output" == *"docker"* ]]
 }
 
+@test "the Image carries git, gh, glab, jq, yq, ripgrep, httpie and curl" {
+  run in_box bash -c 'command -v git gh glab jq yq rg http curl'
+  [ "$status" -eq 0 ]
+}
+
 @test "the Image sets no Maven or Gradle environment: a Box Cache on each directory is all it takes" {
   run in_box env
   [ "$status" -eq 0 ]

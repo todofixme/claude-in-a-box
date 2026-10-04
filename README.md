@@ -87,13 +87,16 @@ claude-box -- --shell
 | `--dry-run`   | Print the `docker run` command instead of running it               |
 | `--help`      | Show usage                                                         |
 
-| Variable                 | Effect                                                 |
-| ------------------------ | ------------------------------------------------------ |
-| `CLAUDE_BOX_IMAGE`       | Default Image reference                                |
-| `CLAUDE_BOX_HOME_VOLUME` | Volume holding Claude's login and state                |
+| Variable                  | Effect                                                 |
+| ------------------------- | ------------------------------------------------------ |
+| `CLAUDE_BOX_IMAGE`        | Default Image reference                                |
+| `CLAUDE_BOX_HOME_VOLUME`  | Volume holding Claude's login and state                |
+| `CLAUDE_BOX_GH_TOKEN`     | Token `gh` uses in the Box                              |
+| `CLAUDE_BOX_GITLAB_TOKEN` | Token `glab` uses in the Box                            |
 
 `--image` overrides `CLAUDE_BOX_IMAGE`. A second home volume gives you a
-second, separate Claude login.
+second, separate Claude login. The two tokens are covered in
+[Git identity and tokens](#git-identity-and-tokens) below.
 
 By default every start pulls the Image, so you get fixes and new Claude Code
 versions without doing anything. `--no-pull` is the escape hatch for working
@@ -116,6 +119,25 @@ The Workspace is the only thing mounted from the Host. Your SSH keys, your
 shell configuration, the rest of your home directory and your Maven and Gradle
 caches are not visible in the Box — a build in a Box downloads into caches of
 its own (see below).
+
+## Git identity and tokens
+
+Claude commits locally under your name: `claude-box` reads `user.name` and
+`user.email` from the Host's own `git config` — the Workspace's local config
+if it has one, your global config otherwise — and passes them into the Box as
+`GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
+`GIT_COMMITTER_EMAIL`. Your SSH keys and any stored HTTPS credentials are not
+mounted, so `git push` from the Box always fails for lack of them — pushing
+stays something you do on the Host, after reviewing what Claude committed.
+
+`gh` and `glab` work read-only if you want them to. Set `CLAUDE_BOX_GH_TOKEN`
+or `CLAUDE_BOX_GITLAB_TOKEN` on the Host and `claude-box` passes it into the
+Box as `GH_TOKEN` or `GITLAB_TOKEN`, which each tool reads directly — so
+`gh issue list`, for instance, works without any further setup. Leave one
+unset and its variable does not exist in the Box at all, not even empty. A
+**read-only, fine-grained token** is recommended for each: the Box never needs
+to write to GitHub or GitLab, and a broader token would hand Claude more than
+it has a use for.
 
 ## Backend tests with Test Containers
 
@@ -277,6 +299,9 @@ docker volume rm claude-maven-my-service-1a2b3c4d5e6f claude-gradle-my-service-1
 - Corepack, enabled, for `pnpm` and `yarn`
 - Playwright CLI, installed from npm at a version pinned in the `Dockerfile`,
   with the system libraries headless Chromium needs
+- `git`, `gh` (from GitHub's own apt repository), `glab`, `jq`, `yq`,
+  `ripgrep`, `httpie` and `curl`, all otherwise from Debian's own apt
+  repository
 
 A Box starts as root, long enough for its entrypoint to bring up `dockerd`
 (`/var/log/dockerd.log` inside the Box, if it ever does not), and drops to

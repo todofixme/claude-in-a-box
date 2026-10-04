@@ -93,6 +93,52 @@ box_shell() {
   [[ "$output" == *"claude"* ]]
 }
 
+@test "a commit made by Claude in the Box carries the Host's Git name and email" {
+  config="$(mktemp)"
+  GIT_CONFIG_GLOBAL="$config" git config --global user.name "Box Test Developer"
+  GIT_CONFIG_GLOBAL="$config" git config --global user.email "box-test@example.com"
+
+  # In ~ rather than the mounted Workspace: a Workspace directory owned by the
+  # Host's user looks dubious to Git once it runs as claude (UID 1000) inside
+  # the Box, which is a Docker-Desktop-on-macOS detail unrelated to this test.
+  GIT_CONFIG_GLOBAL="$config" run box_shell '
+    mkdir -p ~/work && cd ~/work
+    git init -q repo && cd repo
+    git commit --allow-empty -q -m "test"
+    git log -1 --format="%an <%ae>"'
+  rm -f "$config"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Box Test Developer <box-test@example.com>"* ]]
+}
+
+@test "git push from the Box fails for lack of credentials" {
+  run box_shell '
+    mkdir -p ~/work && cd ~/work
+    git init -q repo && cd repo
+    git commit --allow-empty -q -m "test"
+    GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
+      git push git@github.com:torvalds/linux.git HEAD:refs/heads/this-will-fail'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Permission denied"* ]]
+}
+
+@test "CLAUDE_BOX_GH_TOKEN and CLAUDE_BOX_GITLAB_TOKEN reach the Box as GH_TOKEN and GITLAB_TOKEN" {
+  CLAUDE_BOX_GH_TOKEN=a-github-token CLAUDE_BOX_GITLAB_TOKEN=a-gitlab-token \
+    run box_shell 'env | grep -E "^(GH_TOKEN|GITLAB_TOKEN)="'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"GH_TOKEN=a-github-token"* ]]
+  [[ "$output" == *"GITLAB_TOKEN=a-gitlab-token"* ]]
+}
+
+@test "no GitHub or GitLab token env var exists in the Box when neither is set on the Host" {
+  unset CLAUDE_BOX_GH_TOKEN CLAUDE_BOX_GITLAB_TOKEN
+  run box_shell 'env | grep -E "GH_TOKEN|GITLAB_TOKEN" || echo NONE'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NONE"* ]]
+  [[ "$output" != *"TOKEN="* ]]
+}
+
 @test "--no-pull fails on the Host when the Image is missing, without reaching a registry" {
   run env CLAUDE_BOX_IMAGE="claude-in-a-box:definitely-not-built" \
     "$CLAUDE_BOX" --no-pull --shell

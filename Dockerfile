@@ -42,6 +42,23 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && usermod --append --groups docker claude
 
+# `gh`'s own apt repository, the same pattern as Docker's above, because
+# Debian does not package it. `git`, `glab`, `jq`, `yq`, `ripgrep` (binary
+# `rg`) and `httpie` (binary `http`) are already in Debian's own repository,
+# so no extra repository is needed for those; `curl` is too, but is already
+# installed by the Docker Engine step above.
+RUN install -m 0755 -d /etc/apt/keyrings \
+  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+  && chmod a+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+  && printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
+    "$(dpkg --print-architecture)" \
+    > /etc/apt/sources.list.d/github-cli.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+    git gh glab jq yq ripgrep httpie \
+  && rm -rf /var/lib/apt/lists/*
+
 # Maven and Gradle download into ~/.m2 and ~/.gradle, and claude-box mounts a
 # Box Cache of the Workspace onto each (ADR-0004). The two exist here so that
 # docker seeds those volumes with claude as their owner; beyond that the Image

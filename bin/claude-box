@@ -56,12 +56,29 @@ Environment:
   CLAUDE_BOX_IMAGE          Default Image reference
   CLAUDE_BOX_HOME_VOLUME    Volume holding Claude's login and state
                             (default: $DEFAULT_HOME_VOLUME)
+  CLAUDE_BOX_GH_TOKEN       Token \`gh\` uses in the Box; a read-only
+                            fine-grained GitHub token is recommended
+  CLAUDE_BOX_GITLAB_TOKEN   Token \`glab\` uses in the Box; a read-only
+                            GitLab token is recommended
 USAGE
 }
 
 die() {
   printf 'claude-box: %s\n' "$1" >&2
   exit 1
+}
+
+# Appends `-e NAME=value` to docker_argv for each name, but only when value is
+# non-empty: an unset Host variable must leave the Box without the variable
+# at all, not with it set to an empty string.
+pass_env_if_set() {
+  local value="$1"
+  shift
+  [ -n "$value" ] || return 0
+  local name
+  for name in "$@"; do
+    docker_argv+=(-e "$name=$value")
+  done
 }
 
 image="${CLAUDE_BOX_IMAGE:-$DEFAULT_IMAGE}"
@@ -155,6 +172,24 @@ docker_argv=(
   -v "$playwright_volume:$BOX_CACHE_PLAYWRIGHT"
   -w "$workspace"
 )
+
+# Claude commits locally under the developer's identity, read here from the
+# Host's own `git config` so a Workspace-local config wins the way it always
+# does for `git` itself; the Box never gets credentials to push with, so
+# `git push` there fails for lack of them. `git config` exits non-zero on an
+# unset key, which `|| true` turns into an empty string instead of failing
+# the whole script.
+git_author_name="$(git config user.name || true)"
+git_author_email="$(git config user.email || true)"
+pass_env_if_set "$git_author_name" GIT_AUTHOR_NAME GIT_COMMITTER_NAME
+pass_env_if_set "$git_author_email" GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL
+
+# gh and glab both read these variables directly. Unset on the Host, nothing
+# is passed in and neither variable exists in the Box at all, rather than
+# existing empty; a read-only, fine-grained token is what the README
+# recommends for each.
+pass_env_if_set "${CLAUDE_BOX_GH_TOKEN:-}" GH_TOKEN
+pass_env_if_set "${CLAUDE_BOX_GITLAB_TOKEN:-}" GITLAB_TOKEN
 
 # Claude needs a terminal, but asking docker for one when there is none to
 # forward makes it refuse to start, so piping into `--shell` stays possible.
