@@ -10,7 +10,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
 echo "==> shellcheck"
-shellcheck bin/claude-box scripts/*.sh image/entrypoint.sh
+shellcheck bin/claude-box scripts/*.sh image/entrypoint.sh tests/*.sh
 
 echo "==> bats"
 bats tests/

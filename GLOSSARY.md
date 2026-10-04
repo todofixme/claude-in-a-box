@@ -27,3 +27,7 @@ _Avoid_: sidecar, service container
 **Box Cache**:
 A build cache a Box fills and later Boxes on the same Workspace reuse; the Host never reads it, and no cache of the Host's reaches a Box.
 _Avoid_: volume, container cache, host cache
+
+**Code Graph**:
+A searchable graph of a Workspace's symbols and the relationships between them, served to Claude by `codebase-memory-mcp` in a Box started with `--code-graph` (or `CLAUDE_BOX_CODE_GRAPH`); it is built from the Workspace and can lag its working tree.
+_Avoid_: index, code index, memory, codebase memory

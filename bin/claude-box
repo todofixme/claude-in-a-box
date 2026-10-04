@@ -14,6 +14,11 @@
 # A backend build downloads its dependencies into the Box, where one Box Cache
 # per Workspace keeps them for the next Box. Nothing of the Host's own caches
 # is mounted (ADR-0004).
+#
+# `--code-graph` additionally registers the Code Graph server for that Box
+# through Claude's `--mcp-config`, gives the Workspace a Box Cache for its
+# graph and confines indexing to the Workspace (ADR-0005). Without the flag a
+# Box has none of it.
 
 set -euo pipefail
 
@@ -33,6 +38,15 @@ readonly BOX_CACHE_GRADLE="$BOX_HOME/.gradle"
 readonly BOX_CACHE_NPM="$BOX_HOME/.npm"
 readonly BOX_CACHE_PNPM="$BOX_HOME/.local/share/pnpm"
 readonly BOX_CACHE_PLAYWRIGHT="$BOX_HOME/.cache/ms-playwright"
+# Where codebase-memory-mcp keeps a Workspace's graph and its own persisted
+# configuration by default, so a Box Cache mounted here needs no CBM_CACHE_DIR.
+readonly BOX_CACHE_CODE_GRAPH="$BOX_HOME/.cache/codebase-memory-mcp"
+# What `--code-graph` hands Claude. `--mcp-config` and not a managed surface,
+# because `managedMcpServers` drops a `command` entry and
+# /etc/claude-code/managed-mcp.json would take MCP over from the Workspace's
+# own .mcp.json in every Box (ADR-0005). No --strict-mcp-config for the same
+# reason: this adds one server, it does not replace the Workspace's.
+readonly CODE_GRAPH_MCP_CONFIG='{"mcpServers":{"code-graph":{"command":"codebase-memory-mcp"}}}'
 
 usage() {
   cat <<USAGE
@@ -42,6 +56,11 @@ Runs Claude Code in YOLO mode inside a Box, on the current directory.
 
 Options:
   --shell              Open a bash login shell in the Box instead of Claude
+  --code-graph         Give Claude a Code Graph of the Workspace, served by
+                       codebase-memory-mcp. Indexes on the first query and
+                       keeps the graph in a Box Cache of the Workspace; the
+                       graph can lag the working tree, so \`git diff\` and
+                       reading files stay the answer to what just changed
   --no-pull            Use the Image already on the Host instead of pulling
   --image REF          Image to start the Box from
                        (default: \$CLAUDE_BOX_IMAGE, else $DEFAULT_IMAGE)
@@ -60,6 +79,8 @@ Environment:
                             fine-grained GitHub token is recommended
   CLAUDE_BOX_GITLAB_TOKEN   Token \`glab\` uses in the Box; a read-only
                             GitLab token is recommended
+  CLAUDE_BOX_CODE_GRAPH     Set to any value to turn --code-graph on for
+                            every Box without passing the flag
 USAGE
 }
 
@@ -85,12 +106,20 @@ image="${CLAUDE_BOX_IMAGE:-$DEFAULT_IMAGE}"
 pull=1
 shell=0
 dry_run=0
+# Any non-empty value turns it on, the same reading pass_env_if_set gives the
+# token variables: unset on the Host means off, not "off but configured".
+code_graph=0
+[ -z "${CLAUDE_BOX_CODE_GRAPH:-}" ] || code_graph=1
 claude_argv=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --shell)
       shell=1
+      shift
+      ;;
+    --code-graph)
+      code_graph=1
       shift
       ;;
     --no-pull)
@@ -153,6 +182,7 @@ gradle_volume="claude-gradle-$workspace_id"
 npm_volume="claude-npm-$workspace_id"
 pnpm_volume="claude-pnpm-$workspace_id"
 playwright_volume="claude-playwright-$workspace_id"
+code_graph_volume="claude-codegraph-$workspace_id"
 
 docker_argv=(
   docker run --rm -i
@@ -172,6 +202,18 @@ docker_argv=(
   -v "$playwright_volume:$BOX_CACHE_PLAYWRIGHT"
   -w "$workspace"
 )
+
+# Only a --code-graph Box pays for the graph: without the flag there is no Box
+# Cache for one on the Host, no CBM variable in the Box and no --mcp-config
+# below, so none of the server's tool descriptions reach Claude's context.
+if [ "$code_graph" -eq 1 ]; then
+  docker_argv+=(-v "$code_graph_volume:$BOX_CACHE_CODE_GRAPH")
+  # What confines indexing to the Workspace: the server refuses any other
+  # path. The entrypoint reads CLAUDE_BOX_CODE_GRAPH to know it should
+  # configure the server for this Box.
+  docker_argv+=(-e "CBM_ALLOWED_ROOT=$workspace")
+  docker_argv+=(-e "CLAUDE_BOX_CODE_GRAPH=1")
+fi
 
 # Claude commits locally under the developer's identity, read here from the
 # Host's own `git config` so a Workspace-local config wins the way it always
@@ -213,6 +255,13 @@ if [ "$shell" -eq 1 ]; then
 else
   docker_argv+=(claude --dangerously-skip-permissions)
   [ ${#claude_argv[@]} -eq 0 ] || docker_argv+=("${claude_argv[@]}")
+  # Last, after whatever the developer passed: Claude's --mcp-config takes
+  # several values, so a prompt standing right behind it would be read as
+  # another config file and fail. Nothing follows it here, and a flag of
+  # Claude's own ends it the way any option does.
+  if [ "$code_graph" -eq 1 ]; then
+    docker_argv+=(--mcp-config "$CODE_GRAPH_MCP_CONFIG")
+  fi
 fi
 
 if [ "$dry_run" -eq 1 ]; then

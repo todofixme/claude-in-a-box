@@ -21,24 +21,31 @@
       "automerge": true
     },
     {
-      "description": "Base image, GitHub Actions and @playwright/cli land in one weekly PR, not automerged.",
+      "description": "Base image, GitHub Actions, @playwright/cli and codebase-memory-mcp land in one weekly PR, not automerged.",
       "groupName": "weekly maintenance",
       "schedule": ["before 6am on monday"],
       "matchManagers": ["github-actions"]
     },
     {
-      "description": "Base image, GitHub Actions and @playwright/cli land in one weekly PR, not automerged.",
+      "description": "Base image, GitHub Actions, @playwright/cli and codebase-memory-mcp land in one weekly PR, not automerged.",
       "groupName": "weekly maintenance",
       "schedule": ["before 6am on monday"],
       "matchDatasources": ["docker"],
       "matchPackageNames": ["node"]
     },
     {
-      "description": "Base image, GitHub Actions and @playwright/cli land in one weekly PR, not automerged.",
+      "description": "Base image, GitHub Actions, @playwright/cli and codebase-memory-mcp land in one weekly PR, not automerged.",
       "groupName": "weekly maintenance",
       "schedule": ["before 6am on monday"],
       "matchDatasources": ["npm"],
       "matchPackageNames": ["@playwright/cli"]
+    },
+    {
+      "description": "Base image, GitHub Actions, @playwright/cli and codebase-memory-mcp land in one weekly PR, not automerged.",
+      "groupName": "weekly maintenance",
+      "schedule": ["before 6am on monday"],
+      "matchDatasources": ["github-releases"],
+      "matchPackageNames": ["DeusData/codebase-memory-mcp"]
     }
   ]
 }

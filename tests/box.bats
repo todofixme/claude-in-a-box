@@ -274,3 +274,155 @@ EOF'
   [ "$status_other" -eq 0 ]
   [[ "$other_output" != *"here"* ]]
 }
+
+# Drives tests/code-graph-probe.sh in a --code-graph Box on the current
+# directory. The probe asks the Code Graph the way Claude's MCP client does
+# and prints one marker line per thing a test reads; see the script.
+probe_code_graph() {
+  "$CLAUDE_BOX" --no-pull --shell --code-graph < "$BATS_TEST_DIRNAME/code-graph-probe.sh"
+}
+
+# The function the probe queries the graph for, in a Workspace file. Nothing
+# indexes it: a --code-graph Box does that itself on the first MCP connection.
+plant_marker_function() {
+  mkdir -p "$WORKSPACE/src"
+  cat > "$WORKSPACE/src/marker.js" <<'EOF'
+export function boxTestMarkerFunction(name) {
+  return `hello ${name}`;
+}
+EOF
+}
+
+# One marker line's value, by name.
+marker() {
+  local name="$1" probed="$2"
+  printf '%s\n' "$probed" | sed -n "s/^$name: //p" | head -1
+}
+
+@test "a query in a --code-graph Box is answered from a graph nobody indexed by hand" {
+  plant_marker_function
+
+  run probe_code_graph
+  [ "$status" -eq 0 ]
+
+  # This Box is the first on the Workspace, so it started without a graph.
+  [ "$(marker PREEXISTING "$output")" = "no" ]
+  # The entrypoint configured the server, because claude-box said so.
+  [[ "$(marker AUTO_INDEX "$output")" == *"true"* ]]
+  # The Workspace is in the graph, and the probe never asked for an index.
+  [[ "$(marker PROJECTS "$output")" == *"$WORKSPACE"* ]]
+  # And the query is answered with the file and line the function is on.
+  [[ "$(marker ANSWER "$output")" == *"boxTestMarkerFunction"* ]]
+  [[ "$(marker ANSWER "$output")" == *"src/marker.js"* ]]
+}
+
+@test "the Code Graph of a Workspace is found again by the next Box on it" {
+  plant_marker_function
+
+  run probe_code_graph
+  [ "$status" -eq 0 ]
+  [ "$(marker PREEXISTING "$output")" = "no" ]
+  first_project="$(marker PROJECT "$output")"
+
+  # A second Box: the graph is a Box Cache of the Workspace, so it outlives
+  # the first one.
+  run probe_code_graph
+  [ "$status" -eq 0 ]
+  [ "$(marker PREEXISTING "$output")" = "yes" ]
+  [ "$(marker PROJECT "$output")" = "$first_project" ]
+  [[ "$(marker ANSWER "$output")" == *"boxTestMarkerFunction"* ]]
+}
+
+@test "another Workspace has a Code Graph of its own" {
+  plant_marker_function
+
+  run probe_code_graph
+  [ "$status" -eq 0 ]
+  here="$(marker PROJECTS "$output")"
+
+  enter_other_workspace
+  run probe_code_graph
+  status_other="$status"
+  there="$(marker PROJECTS "$output")"
+  forget_workspace_volumes
+  leave_other_workspace
+
+  [ "$status_other" -eq 0 ]
+  # The second Workspace's graph knows only itself: the first Workspace's
+  # path is not in it.
+  [[ "$there" != *"$WORKSPACE"* ]]
+  [[ "$here" != "$there" ]]
+}
+
+@test "indexing cannot reach outside the Workspace" {
+  plant_marker_function
+
+  run probe_code_graph
+  [ "$status" -eq 0 ]
+  [ "$(marker ROOT "$output")" = "$WORKSPACE" ]
+  # $HOME in the Box holds Claude's login and every Box Cache; the server
+  # refuses it rather than indexing it.
+  [[ "$(marker OUTSIDE "$output")" == *"outside the allowed root"* ]]
+  [[ "$(marker PROJECTS "$output")" != *"/home/claude"* ]]
+}
+
+@test "the graph UI never starts, so there is nothing for a published port to reach" {
+  plant_marker_function
+
+  run probe_code_graph
+  [ "$status" -eq 0 ]
+  [[ "$(marker UI_ENABLED "$output")" == *"false"* ]]
+  [ "$(marker UI_LISTENING "$output")" = "no" ]
+}
+
+@test "Claude in the Box accepts the --mcp-config claude-box registers the server with" {
+  # Read from the CLI rather than written out again, so the two cannot drift.
+  config="$(
+    sed -n 's/^readonly CODE_GRAPH_MCP_CONFIG=.\(.*\).$/\1/p' "$BATS_TEST_DIRNAME/../bin/claude-box"
+  )"
+  [ -n "$config" ]
+
+  # `claude doctor` validates every --mcp-config value before doing anything,
+  # which is as far as a Box with no login can get. --mcp-config takes several
+  # values, so `doctor` itself is read as a second one and reported missing:
+  # that complaint is expected, and the config claude-box sends must not be
+  # named beside it.
+  run box_shell "claude --mcp-config '$config' doctor 2>&1 | head -5"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"mcpServers"* ]]
+  [[ "$output" != *"codebase-memory-mcp"* ]]
+
+  # The same invocation with a config Claude cannot read, to show the check
+  # above would have caught one.
+  run box_shell "claude --mcp-config '{\"mcpServers\":}' doctor 2>&1 | head -5"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mcpServers"* ]]
+}
+
+@test "a Box without --code-graph leaves no Box Cache for a graph on the Host" {
+  run box_shell 'test -e ~/.cache/codebase-memory-mcp && ls -A ~/.cache/codebase-memory-mcp; echo DONE'
+  [ "$status" -eq 0 ]
+  # The directory is in the Image, so it exists; nothing is mounted onto it
+  # and nothing wrote to it.
+  [[ "$output" == *"DONE"* ]]
+  [[ "$output" != *".db"* ]]
+
+  # The one a --code-graph Box would have given this Workspace.
+  graph_cache="$(workspace_volumes --code-graph | grep codegraph)"
+  [ -n "$graph_cache" ]
+  run docker volume ls --format '{{.Name}}'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"$graph_cache"* ]]
+}
+
+@test "a Box without --code-graph has no CBM environment and no Code Graph configured for it" {
+  run box_shell 'env | grep -E "CBM_|CLAUDE_BOX_CODE_GRAPH" || echo NONE'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NONE"* ]]
+
+  # The server is on the PATH either way — it is in the Image — but nothing
+  # turned auto_index on for this Box.
+  run box_shell 'codebase-memory-mcp config get auto_index'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"false"* ]]
+}

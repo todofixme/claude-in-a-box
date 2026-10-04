@@ -24,6 +24,12 @@ setup_file() {
     sed -n 's/^ARG CCSTATUSLINE_VERSION=\(.*\)$/\1/p' "$BATS_TEST_DIRNAME/../Dockerfile"
   )"
   export PINNED_CCSTATUSLINE_VERSION
+  # The release tag, so without its leading `v` for comparison with what the
+  # binary reports.
+  PINNED_CODE_GRAPH_VERSION="$(
+    sed -n 's/^ARG CODEBASE_MEMORY_MCP_VERSION=v\{0,1\}\(.*\)$/\1/p' "$BATS_TEST_DIRNAME/../Dockerfile"
+  )"
+  export PINNED_CODE_GRAPH_VERSION
 }
 
 # Runs a command in a throwaway Box, as the Image's default user. `-i` keeps
@@ -200,4 +206,61 @@ in_box() {
   run in_box stat -c '%U:%G' /home/claude/.cache /home/claude/.local /home/claude/.local/share
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'claude:claude')" -eq 3 ]
+}
+
+@test "codebase-memory-mcp is on the PATH at the version the Image pins" {
+  [ -n "$PINNED_CODE_GRAPH_VERSION" ]
+  run in_box bash -c 'command -v codebase-memory-mcp'
+  [ "$status" -eq 0 ]
+
+  run in_box codebase-memory-mcp --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$PINNED_CODE_GRAPH_VERSION"* ]]
+}
+
+@test "codebase-memory-mcp serves the 17 tools a Code Graph is asked with" {
+  # 17 is the number a --code-graph Box adds to Claude's context and the
+  # reason the server is a flag rather than something every Box carries, so
+  # it is counted rather than taken on trust. `--help` ends with the list.
+  run in_box codebase-memory-mcp --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"index_repository"* ]]
+  [[ "$output" == *"search_graph"* ]]
+
+  tools="$(
+    printf '%s\n' "$output" | sed -n '/^Tools:/,$p' |
+      tr ',' '\n' | grep -cE '[a-z_]{4,}'
+  )"
+  [ "$tools" -eq 17 ]
+}
+
+@test "~/.cache/codebase-memory-mcp belongs to claude, so the graph's Box Cache seeds correctly" {
+  run in_box stat -c '%U:%G' /home/claude/.cache/codebase-memory-mcp
+  [ "$status" -eq 0 ]
+  [ "$output" = "claude:claude" ]
+}
+
+@test "the Image sets no CBM environment: claude-box sets what a --code-graph Box needs" {
+  run in_box env
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"CBM_"* ]]
+  [[ "$output" != *"CLAUDE_BOX_CODE_GRAPH"* ]]
+}
+
+@test "the Image registers the Code Graph server nowhere: --mcp-config does that per Box" {
+  run in_box cat /etc/claude-code/managed-settings.json
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"codebase-memory-mcp"* ]]
+  [[ "$output" != *"mcpServers"* ]]
+
+  # The managed MCP surface takes MCP over from a Workspace's own .mcp.json in
+  # every Box, which is why ADR-0005 does not use it.
+  run in_box test -e /etc/claude-code/managed-mcp.json
+  [ "$status" -ne 0 ]
+
+  # The tarball's own installer writes client configuration; only the binary
+  # is kept.
+  run in_box bash -c 'ls /usr/local/bin | grep -c codebase-memory'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
 }

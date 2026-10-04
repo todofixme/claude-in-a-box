@@ -79,13 +79,14 @@ claude-box -- --shell
 
 ### Flags
 
-| Flag          | Effect                                                             |
-| ------------- | ------------------------------------------------------------------ |
-| `--shell`     | Open a bash login shell in the Box instead of Claude               |
-| `--no-pull`   | Use the Image already on the Host instead of pulling a new one     |
-| `--image REF` | Start the Box from another Image                                   |
-| `--dry-run`   | Print the `docker run` command instead of running it               |
-| `--help`      | Show usage                                                         |
+| Flag            | Effect                                                             |
+| --------------- | ------------------------------------------------------------------ |
+| `--shell`       | Open a bash login shell in the Box instead of Claude               |
+| `--code-graph`  | Give Claude a Code Graph of the Workspace (see below)              |
+| `--no-pull`     | Use the Image already on the Host instead of pulling a new one     |
+| `--image REF`   | Start the Box from another Image                                   |
+| `--dry-run`     | Print the `docker run` command instead of running it               |
+| `--help`        | Show usage                                                         |
 
 | Variable                  | Effect                                                 |
 | ------------------------- | ------------------------------------------------------ |
@@ -93,6 +94,7 @@ claude-box -- --shell
 | `CLAUDE_BOX_HOME_VOLUME`  | Volume holding Claude's login and state                |
 | `CLAUDE_BOX_GH_TOKEN`     | Token `gh` uses in the Box                              |
 | `CLAUDE_BOX_GITLAB_TOKEN` | Token `glab` uses in the Box                            |
+| `CLAUDE_BOX_CODE_GRAPH`   | Turn `--code-graph` on for every Box                   |
 
 `--image` overrides `CLAUDE_BOX_IMAGE`. A second home volume gives you a
 second, separate Claude login. The two tokens are covered in
@@ -248,6 +250,56 @@ The Workspace's own `@playwright/test` downloads its matching browser the same w
 Playwright CLI's did, into the same Box Cache, so the second Box on a Workspace
 runs its E2E suite without downloading anything.
 
+## Code Graph
+
+On a large Workspace, answering "where is this used" by searching hundreds of
+files with `rg` is slow and incomplete. `--code-graph` gives Claude a **Code
+Graph** instead: a searchable graph of the Workspace's symbols and how they
+relate, served inside the Box by
+[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) at a
+version pinned in the `Dockerfile`.
+
+```sh
+cd ~/projects/my-app
+claude-box --code-graph
+> which callers would break if I change the signature of OrderService.place?
+```
+
+There is no indexing step. The first time Claude connects to the server it
+indexes the Workspace itself; on a big Workspace the first question therefore
+takes a while to come back, and the ones after it are fast. The graph goes
+into a Box Cache of the Workspace:
+
+| In the Box                     | Volume                                   |
+| ------------------------------ | ---------------------------------------- |
+| `~/.cache/codebase-memory-mcp` | `claude-codegraph-my-service-<digest>`   |
+
+So the next Box on that Workspace finds the graph the last one built, and
+another Workspace gets a graph of its own. Set `CLAUDE_BOX_CODE_GRAPH` to any
+value on the Host if you want every Box to have one without passing the flag.
+
+**The graph can lag the working tree.** It is a snapshot, refreshed as the
+server notices changes, so `git diff` and reading the files stay the answer to
+"what did I just change" — the graph is for finding your way around code you
+have not just written.
+
+Two things are deliberately true of it:
+
+- **Indexing stays inside the Workspace.** `claude-box` points the server at
+  the Workspace and it refuses any other path, so the graph never covers
+  `$HOME` in the Box, Claude's login or the Box Caches.
+- **The graph UI never starts and no port is published.** The server can serve
+  an HTTP visualisation of the graph; a Box turns it off, because nothing in a
+  Box would open it.
+
+A Box started **without** the flag is exactly what it was before: the server is
+in the Image but nothing registers it, no graph volume is created on the Host,
+and none of its 17 tool descriptions reach Claude's context. That is why this
+is a flag rather than something every Box has
+([ADR 0005](docs/adr/0005-code-graph-registered-per-box-via-mcp-config.md),
+which also records why registration goes through Claude's `--mcp-config`
+instead of the Image's managed settings).
+
 ## What persists between Boxes
 
 A Box itself is thrown away when you leave it (`docker run --rm`). The volumes
@@ -264,6 +316,8 @@ survive it:
   `claude-playwright-<workspace>-<digest>`, the Box Caches of the Frontend
   tooling section, hold one Workspace's frontend dependencies and downloaded
   browsers.
+- `claude-codegraph-<workspace>-<digest>`, holding one Workspace's Code Graph.
+  Only a `--code-graph` Box creates it.
 
 To start over with a clean slate, including logging in again:
 
@@ -288,6 +342,12 @@ docker volume rm claude-maven-my-service-1a2b3c4d5e6f claude-gradle-my-service-1
   claude-playwright-my-service-1a2b3c4d5e6f
 ```
 
+To make a Workspace's Code Graph be built again from scratch:
+
+```sh
+docker volume rm claude-codegraph-my-service-1a2b3c4d5e6f
+```
+
 ## What the Image contains
 
 - `node:24-trixie` as the base
@@ -299,6 +359,10 @@ docker volume rm claude-maven-my-service-1a2b3c4d5e6f claude-gradle-my-service-1
 - Corepack, enabled, for `pnpm` and `yarn`
 - Playwright CLI, installed from npm at a version pinned in the `Dockerfile`,
   with the system libraries headless Chromium needs
+- `codebase-memory-mcp`, the Code Graph server, downloaded from its GitHub
+  release at a version pinned in the `Dockerfile` and verified against that
+  release's `checksums.txt` at build time. Registered for a Box only by
+  `--code-graph`
 - `git`, `gh` (from GitHub's own apt repository), `glab`, `jq`, `yq`,
   `ripgrep`, `httpie` and `curl`, all otherwise from Debian's own apt
   repository
@@ -341,11 +405,15 @@ The suite is in three parts:
   `--dry-run`. Needs neither Docker nor an Image.
 - `tests/image.bats` — the built Image: user, sudo, pinned versions, managed
   settings, JDK, Docker Engine, corepack, Playwright CLI and the Chromium
-  libraries it needs, and that it configures Maven, Gradle and npm not at all.
+  libraries it needs, the Code Graph server, and that it configures Maven,
+  Gradle and npm not at all.
 - `tests/box.bats` — real Boxes: the Workspace mount, state surviving a
   restart, separate session histories per Workspace, the Box's own Docker and
-  its per-Workspace Docker data, one Box per Workspace, and the Box Caches a
-  Workspace downloads into. Uses its own home volume, so your Claude login is
+  its per-Workspace Docker data, one Box per Workspace, the Box Caches a
+  Workspace downloads into, and the Code Graph — a `--code-graph` Box answers
+  a query from a graph nothing indexed by hand, via
+  `tests/code-graph-probe.sh`, which drives the server over stdio the way
+  Claude's MCP client does. Uses its own home volume, so your Claude login is
   left alone, and throws away the Docker data and Box Caches its Boxes leave
   behind.
 
@@ -364,12 +432,12 @@ version without reading a changelog.
 
 ### Dependency updates
 
-`renovate.json` picks up three versions pinned by an `ARG ..._VERSION=` line
-in the `Dockerfile` — Claude Code, ccstatusline and `@playwright/cli` — via a
-custom regex manager keyed off the `# renovate: datasource=... depName=...`
-comment directly above each `ARG`. Claude Code and ccstatusline PRs
-automerge once the PR build is green, so the merge to `main` publishes a new
-`claude-<version>` Image. The base image digest, GitHub Actions and
-`@playwright/cli` are grouped into a single weekly PR that is never
-automerged, since none of the three gate on the build the way Claude Code and
-ccstatusline do.
+`renovate.json` picks up four versions pinned by an `ARG ..._VERSION=` line in
+the `Dockerfile` — Claude Code, ccstatusline, `@playwright/cli` and
+`codebase-memory-mcp` — via a custom regex manager keyed off the
+`# renovate: datasource=... depName=...` comment directly above each `ARG`.
+Claude Code and ccstatusline PRs automerge once the PR build is green, so the
+merge to `main` publishes a new `claude-<version>` Image. The base image
+digest, GitHub Actions, `@playwright/cli` and `codebase-memory-mcp` are
+grouped into a single weekly PR that is never automerged, since none of the
+four gate on the build the way Claude Code and ccstatusline do.

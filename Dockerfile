@@ -95,17 +95,46 @@ RUN npm install -g "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
   && npm cache clean --force \
   && "$(npm root -g)/@playwright/cli/node_modules/.bin/playwright" install-deps chromium
 
+# codebase-memory-mcp serves the Code Graph of a Workspace (ADR-0005). Pinned
+# here and nowhere else, downloaded from the upstream release and verified
+# against that release's own `checksums.txt` before anything is unpacked; the
+# ARG carries the release tag, since that is what a GitHub release is named
+# by. arm64 only, because the Image targets linux/arm64. Only the binary is
+# kept: the tarball's `install.sh` writes MCP client configuration, which is
+# `--mcp-config`'s job per Box. `sha256sum --ignore-missing` checks the one
+# asset downloaded and skips the release's other platforms; with none of them
+# present it verifies nothing and fails, which is what should happen if the
+# asset is ever renamed. Nothing registers the server here — a Box gets it
+# only through `claude-box --code-graph`.
+# renovate: datasource=github-releases depName=DeusData/codebase-memory-mcp
+ARG CODEBASE_MEMORY_MCP_VERSION=v0.11.0
+RUN tmp="$(mktemp -d)" \
+  && cd "$tmp" \
+  && base="https://github.com/DeusData/codebase-memory-mcp/releases/download/${CODEBASE_MEMORY_MCP_VERSION}" \
+  && curl -fsSLO "$base/codebase-memory-mcp-linux-arm64.tar.gz" \
+  && curl -fsSLO "$base/checksums.txt" \
+  && sha256sum --ignore-missing --check checksums.txt \
+  && tar xzf codebase-memory-mcp-linux-arm64.tar.gz codebase-memory-mcp \
+  && install -m 0755 codebase-memory-mcp /usr/local/bin/codebase-memory-mcp \
+  && cd / \
+  && rm -rf "$tmp"
+
 # npm's cache, pnpm's store and Playwright's browser cache all live under
 # claude's home and get a Box Cache of the Workspace mounted onto them
 # (ADR-0004), the same mechanism as ~/.m2 and ~/.gradle above. `install -d`
 # only chowns the directories named, not the parents it creates along the
 # way, so ~/.cache, ~/.local/share and ~/.config are listed too: corepack's
 # own cache sits at ~/.cache/node next to ~/.cache/ms-playwright, and without
-# write access there `pnpm`/`yarn` fail outright.
+# write access there `pnpm`/`yarn` fail outright. ~/.cache/codebase-memory-mcp
+# is where codebase-memory-mcp keeps a Workspace's graph and its own
+# configuration by default, so a `--code-graph` Box gets a Box Cache there and
+# needs no CBM_CACHE_DIR; a Box without the flag gets no volume there and
+# leaves the directory empty.
 RUN install -d -o claude -g claude \
   /home/claude/.npm \
   /home/claude/.cache \
   /home/claude/.cache/ms-playwright \
+  /home/claude/.cache/codebase-memory-mcp \
   /home/claude/.local \
   /home/claude/.local/share \
   /home/claude/.local/share/pnpm \

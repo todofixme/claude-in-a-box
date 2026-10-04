@@ -276,3 +276,92 @@ teardown() {
   [[ "$output" == *"CLAUDE_BOX_GH_TOKEN"* ]]
   [[ "$output" == *"CLAUDE_BOX_GITLAB_TOKEN"* ]]
 }
+
+@test "--code-graph starts Claude with the code-graph MCP server" {
+  run "$CLAUDE_BOX" --dry-run --code-graph
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claude --dangerously-skip-permissions --mcp-config"* ]]
+  [[ "$output" == *'code-graph'* ]]
+  [[ "$output" == *'codebase-memory-mcp'* ]]
+}
+
+@test "--code-graph puts --mcp-config behind a prompt, which it would otherwise swallow" {
+  # Claude's --mcp-config takes several values, so a prompt standing right
+  # behind it is read as another config file.
+  run "$CLAUDE_BOX" --dry-run --code-graph "find the dead code"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"find\ the\ dead\ code --mcp-config"* ]]
+  [[ "$output" != *"--mcp-config "*"find\ the\ dead\ code"* ]]
+}
+
+@test "CLAUDE_BOX_CODE_GRAPH does what the flag does" {
+  # Compared whole rather than feature by feature: the two ways in must give
+  # the same Box, not merely both mention the graph.
+  with_flag="$("$CLAUDE_BOX" --dry-run --code-graph)"
+  with_variable="$(CLAUDE_BOX_CODE_GRAPH=1 "$CLAUDE_BOX" --dry-run)"
+  [ "$with_flag" = "$with_variable" ]
+  [[ "$with_variable" == *"--mcp-config"* ]]
+}
+
+@test "--code-graph gives the Workspace a Box Cache for its graph and confines indexing to it" {
+  run "$CLAUDE_BOX" --dry-run --code-graph
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ -v\ claude-codegraph-[A-Za-z0-9_.-]+:/home/claude/\.cache/codebase-memory-mcp ]]
+  [[ "$output" == *"-e CBM_ALLOWED_ROOT=$WORKSPACE"* ]]
+  [[ "$output" == *"-e CLAUDE_BOX_CODE_GRAPH=1"* ]]
+}
+
+@test "the graph Box Cache is the same on every start in a Workspace, and another Workspace's is not" {
+  here="$(workspace_volumes --code-graph)"
+  # The six a plain Box gets, plus the graph.
+  [ "$(printf '%s\n' "$here" | wc -l | tr -d ' ')" -eq 7 ]
+  [ "$here" = "$(workspace_volumes --code-graph)" ]
+
+  enter_other_workspace
+  there="$(workspace_volumes --code-graph)"
+  leave_other_workspace
+
+  [ "$here" != "$there" ]
+}
+
+@test "a Box without --code-graph has no MCP config, no graph mount and nothing of the server" {
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"--mcp-config"* ]]
+  [[ "$output" != *"codegraph"* ]]
+  [[ "$output" != *"codebase-memory-mcp"* ]]
+  [[ "$output" != *"CBM_"* ]]
+  [[ "$output" != *"CLAUDE_BOX_CODE_GRAPH"* ]]
+}
+
+@test "an empty CLAUDE_BOX_CODE_GRAPH leaves the Box without a graph" {
+  CLAUDE_BOX_CODE_GRAPH= run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"--mcp-config"* ]]
+  [[ "$output" != *"codegraph"* ]]
+}
+
+@test "--code-graph publishes no port, so the graph UI is unreachable even if it ran" {
+  run "$CLAUDE_BOX" --dry-run --code-graph
+  [ "$status" -eq 0 ]
+  [[ "$output" != *" -p "* ]]
+  [[ "$output" != *"--publish"* ]]
+  [[ "$output" != *"9749"* ]]
+}
+
+@test "--shell --code-graph opens a shell in a Box that has the graph but no Claude to register it with" {
+  run "$CLAUDE_BOX" --dry-run --shell --code-graph
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bash -l"* ]]
+  [[ "$output" == *"-e CLAUDE_BOX_CODE_GRAPH=1"* ]]
+  [[ "$output" != *"--mcp-config"* ]]
+}
+
+@test "--help documents --code-graph, CLAUDE_BOX_CODE_GRAPH and that the graph can lag the working tree" {
+  run "$CLAUDE_BOX" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--code-graph"* ]]
+  [[ "$output" == *"CLAUDE_BOX_CODE_GRAPH"* ]]
+  [[ "$output" == *"codebase-memory-mcp"* ]]
+  [[ "$output" == *"lag the working tree"* ]]
+}

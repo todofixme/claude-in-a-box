@@ -44,10 +44,12 @@ workspace_docker_volume() {
 }
 
 # Every volume a Box gives the Workspace we are in, one per line: its Docker
-# data and its five Box Caches. The home volume is shared, so not one of them.
+# data and its Box Caches. The home volume is shared, so not one of them. Any
+# arguments go to claude-box, so `workspace_volumes --code-graph` names the
+# volumes that Box would get.
 workspace_volumes() {
-  "$CLAUDE_BOX" --dry-run | tr ' ' '\n' |
-    grep -E '^claude-(docker|maven|gradle|npm|pnpm|playwright)-[^:]+:' | cut -d: -f1
+  "$CLAUDE_BOX" --dry-run "$@" | tr ' ' '\n' |
+    grep -E '^claude-(docker|maven|gradle|npm|pnpm|playwright|codegraph)-[^:]+:' | cut -d: -f1
 }
 
 # A second Workspace next to the one from setup, to compare against. Leave it
@@ -68,7 +70,10 @@ leave_other_workspace() {
 # it.
 forget_workspace_volumes() {
   local volumes
-  volumes="$(workspace_volumes)"
+  # --code-graph, because its volume is the only one a Box leaves behind that
+  # a plain start does not name, and a test that used the flag must not leave
+  # the Workspace's graph for the next one.
+  volumes="$(workspace_volumes --code-graph)"
   [ -n "$volumes" ] || return 0
   # shellcheck disable=SC2086 # one docker call for all of them
   docker volume rm -f $volumes >/dev/null 2>&1 || true
