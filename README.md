@@ -361,3 +361,15 @@ publishes the Image to `ghcr.io/todofixme/claude-in-a-box`, tagged `latest`,
 `sha-<short commit>` and `claude-<version>` — the Claude Code version pinned
 in the `Dockerfile`, so you can pull the Image that has a specific Claude Code
 version without reading a changelog.
+
+### Dependency updates
+
+`renovate.json` picks up three versions pinned by an `ARG ..._VERSION=` line
+in the `Dockerfile` — Claude Code, ccstatusline and `@playwright/cli` — via a
+custom regex manager keyed off the `# renovate: datasource=... depName=...`
+comment directly above each `ARG`. Claude Code and ccstatusline PRs
+automerge once the PR build is green, so the merge to `main` publishes a new
+`claude-<version>` Image. The base image digest, GitHub Actions and
+`@playwright/cli` are grouped into a single weekly PR that is never
+automerged, since none of the three gate on the build the way Claude Code and
+ccstatusline do.

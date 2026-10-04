@@ -78,8 +78,8 @@ RUN corepack enable
 # Image. A developer's own layout lives in ~/.config/ccstatusline, which the
 # claude-home volume already covers, so nothing further is needed here for it
 # to survive a Box restart.
-ARG CCSTATUSLINE_VERSION=2.2.30
 # renovate: datasource=npm depName=ccstatusline
+ARG CCSTATUSLINE_VERSION=2.2.30
 RUN npm install -g "ccstatusline@${CCSTATUSLINE_VERSION}" \
   && npm cache clean --force
 
@@ -89,8 +89,8 @@ RUN npm install -g "ccstatusline@${CCSTATUSLINE_VERSION}" \
 # binary itself is not baked in here, the same way the Image carries no
 # Gradle distribution. It downloads on first use into a Box Cache of the
 # Workspace, like the Workspace's own `@playwright/test` browser does.
-ARG PLAYWRIGHT_CLI_VERSION=0.1.22
 # renovate: datasource=npm depName=@playwright/cli
+ARG PLAYWRIGHT_CLI_VERSION=0.1.22
 RUN npm install -g "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
   && npm cache clean --force \
   && "$(npm root -g)/@playwright/cli/node_modules/.bin/playwright" install-deps chromium

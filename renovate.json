@@ -1,6 +1,44 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "docker:pinDigests"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+ARG .*?_VERSION=(?<currentValue>.*)\\s"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Claude Code and ccstatusline automerge once the PR build is green, publishing a new Image.",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["@anthropic-ai/claude-code", "ccstatusline"],
+      "automerge": true
+    },
+    {
+      "description": "Base image, GitHub Actions and @playwright/cli land in one weekly PR, not automerged.",
+      "groupName": "weekly maintenance",
+      "schedule": ["before 6am on monday"],
+      "matchManagers": ["github-actions"]
+    },
+    {
+      "description": "Base image, GitHub Actions and @playwright/cli land in one weekly PR, not automerged.",
+      "groupName": "weekly maintenance",
+      "schedule": ["before 6am on monday"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["node"]
+    },
+    {
+      "description": "Base image, GitHub Actions and @playwright/cli land in one weekly PR, not automerged.",
+      "groupName": "weekly maintenance",
+      "schedule": ["before 6am on monday"],
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["@playwright/cli"]
+    }
   ]
 }
