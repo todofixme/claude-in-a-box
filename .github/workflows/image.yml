@@ -61,7 +61,7 @@ jobs:
       # Tags are harmless to compute on a PR too: push stays false, so nothing
       # is sent anywhere and the tag names never get used.
       - name: Build, and publish on pushes to main
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/arm64
