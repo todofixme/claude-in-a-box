@@ -73,6 +73,16 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
 # on first use. There is nothing to pin here: the Workspace pins it.
 RUN corepack enable
 
+# ccstatusline renders Claude's status line (wired up below via managed
+# settings), pinned version so an update only ever reaches a Box through this
+# Image. A developer's own layout lives in ~/.config/ccstatusline, which the
+# claude-home volume already covers, so nothing further is needed here for it
+# to survive a Box restart.
+ARG CCSTATUSLINE_VERSION=2.2.30
+# renovate: datasource=npm depName=ccstatusline
+RUN npm install -g "ccstatusline@${CCSTATUSLINE_VERSION}" \
+  && npm cache clean --force
+
 # Playwright CLI, pinned version, so Claude can drive a browser directly.
 # Only the system libraries headless Chromium needs are installed in the
 # Image, since those are the same for every Chromium build; the browser

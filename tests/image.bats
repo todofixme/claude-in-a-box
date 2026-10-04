@@ -20,11 +20,17 @@ setup_file() {
     sed -n 's/^ARG PLAYWRIGHT_CLI_VERSION=\(.*\)$/\1/p' "$BATS_TEST_DIRNAME/../Dockerfile"
   )"
   export PINNED_PLAYWRIGHT_CLI_VERSION
+  PINNED_CCSTATUSLINE_VERSION="$(
+    sed -n 's/^ARG CCSTATUSLINE_VERSION=\(.*\)$/\1/p' "$BATS_TEST_DIRNAME/../Dockerfile"
+  )"
+  export PINNED_CCSTATUSLINE_VERSION
 }
 
-# Runs a command in a throwaway Box, as the Image's default user.
+# Runs a command in a throwaway Box, as the Image's default user. `-i` keeps
+# stdin open so a test can pipe input into it; nothing pipes into the ones
+# that don't need to.
 in_box() {
-  docker run --rm --pull never "$IMAGE" "$@"
+  docker run --rm -i --pull never "$IMAGE" "$@"
 }
 
 @test "the Image is built for linux/arm64" {
@@ -71,6 +77,27 @@ in_box() {
 @test "managed settings leave YOLO mode available" {
   run in_box grep -c disableBypassPermissionsMode /etc/claude-code/managed-settings.json
   [ "$status" -ne 0 ]
+}
+
+@test "the status line is set by managed settings to run ccstatusline, so it applies regardless of the claude-home volume" {
+  run in_box cat /etc/claude-code/managed-settings.json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"statusLine"'* ]]
+  [[ "$output" == *'"command": "ccstatusline"'* ]]
+}
+
+@test "ccstatusline is installed at the version the Image pins" {
+  [ -n "$PINNED_CCSTATUSLINE_VERSION" ]
+  run in_box ccstatusline --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$PINNED_CCSTATUSLINE_VERSION"* ]]
+}
+
+@test "ccstatusline renders the default layout from Claude's session JSON on stdin" {
+  run in_box ccstatusline <<< '{"model":{"display_name":"TestModel"}}'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Model:"* ]]
+  [[ "$output" == *"TestModel"* ]]
 }
 
 @test "the Box's home directory belongs to claude, so the claude-home volume is seeded correctly" {

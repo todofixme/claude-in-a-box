@@ -63,6 +63,24 @@ box_shell() {
   [[ "$output" == *"stored"* ]]
 }
 
+@test "a customised ccstatusline layout survives a Box restart, because it lives in the claude-home volume" {
+  run box_shell '
+    mkdir -p ~/.config/ccstatusline
+    cat > ~/.config/ccstatusline/settings.json <<EOF
+{
+  "version": 4,
+  "lines": [[ { "id": "1", "type": "custom-text", "customText": "MARKER-XYZ" } ]],
+  "globalOverrides": {}
+}
+EOF'
+  [ "$status" -eq 0 ]
+
+  # A second Box, same mechanism as the test above.
+  run box_shell 'echo "{}" | ccstatusline'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MARKER-XYZ"* ]]
+}
+
 @test "two Workspaces have separate session histories" {
   # Claude records a session under ~/.claude/projects/<working directory>, so
   # Workspaces mounted at their own Host paths cannot share a history. A
