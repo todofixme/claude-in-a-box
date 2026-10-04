@@ -184,17 +184,28 @@ teardown() {
   [[ "$output" =~ -v\ claude-gradle-[A-Za-z0-9_.-]+:/home/claude/\.gradle ]]
 }
 
-@test "mounts nothing of the Host's home, so its Maven and Gradle caches stay out" {
+@test "gives the Workspace its own Box Caches for npm, pnpm and Playwright" {
+  run "$CLAUDE_BOX" --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ -v\ claude-npm-[A-Za-z0-9_.-]+:/home/claude/\.npm ]]
+  [[ "$output" =~ -v\ claude-pnpm-[A-Za-z0-9_.-]+:/home/claude/\.local/share/pnpm ]]
+  [[ "$output" =~ -v\ claude-playwright-[A-Za-z0-9_.-]+:/home/claude/\.cache/ms-playwright ]]
+}
+
+@test "mounts nothing of the Host's home, so its frontend and backend caches stay out" {
   run "$CLAUDE_BOX" --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" != *"-v $HOME/.m2"* ]]
   [[ "$output" != *"-v $HOME/.gradle"* ]]
+  [[ "$output" != *"-v $HOME/.npm"* ]]
+  [[ "$output" != *"-v $HOME/.local/share/pnpm"* ]]
+  [[ "$output" != *"-v $HOME/.cache/ms-playwright"* ]]
   [[ "$output" != *":ro"* ]]
 }
 
 @test "the Box Caches are the same on every start in a Workspace, and another Workspace's are not" {
   here="$(workspace_volumes)"
-  [ "$(printf '%s\n' "$here" | wc -l | tr -d ' ')" -eq 3 ]
+  [ "$(printf '%s\n' "$here" | wc -l | tr -d ' ')" -eq 6 ]
   [ "$here" = "$(workspace_volumes)" ]
 
   enter_other_workspace
@@ -210,4 +221,7 @@ teardown() {
   [[ "$output" != *"HOST_HOME"* ]]
   [[ "$output" != *"MAVEN"* ]]
   [[ "$output" != *"GRADLE"* ]]
+  [[ "$output" != *"NPM"* ]]
+  [[ "$output" != *"PNPM"* ]]
+  [[ "$output" != *"PLAYWRIGHT"* ]]
 }

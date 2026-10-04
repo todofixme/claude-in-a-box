@@ -44,10 +44,10 @@ workspace_docker_volume() {
 }
 
 # Every volume a Box gives the Workspace we are in, one per line: its Docker
-# data and its two Box Caches. The home volume is shared, so not one of them.
+# data and its five Box Caches. The home volume is shared, so not one of them.
 workspace_volumes() {
   "$CLAUDE_BOX" --dry-run | tr ' ' '\n' |
-    grep -E '^claude-(docker|maven|gradle)-[^:]+:' | cut -d: -f1
+    grep -E '^claude-(docker|maven|gradle|npm|pnpm|playwright)-[^:]+:' | cut -d: -f1
 }
 
 # A second Workspace next to the one from setup, to compare against. Leave it

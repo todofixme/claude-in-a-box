@@ -51,6 +51,50 @@ RUN install -d -o claude -g claude /home/claude/.m2 /home/claude/.gradle
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && npm cache clean --force
 
+# Corepack ships with Node and resolves `pnpm`/`yarn` to the exact version a
+# Workspace declares in its "packageManager" field, downloading that version
+# on first use. There is nothing to pin here: the Workspace pins it.
+RUN corepack enable
+
+# Playwright CLI, pinned version, so Claude can drive a browser directly.
+# Only the system libraries headless Chromium needs are installed in the
+# Image, since those are the same for every Chromium build; the browser
+# binary itself is not baked in here, the same way the Image carries no
+# Gradle distribution. It downloads on first use into a Box Cache of the
+# Workspace, like the Workspace's own `@playwright/test` browser does.
+ARG PLAYWRIGHT_CLI_VERSION=0.1.22
+# renovate: datasource=npm depName=@playwright/cli
+RUN npm install -g "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
+  && npm cache clean --force \
+  && "$(npm root -g)/@playwright/cli/node_modules/.bin/playwright" install-deps chromium
+
+# npm's cache, pnpm's store and Playwright's browser cache all live under
+# claude's home and get a Box Cache of the Workspace mounted onto them
+# (ADR-0004), the same mechanism as ~/.m2 and ~/.gradle above. `install -d`
+# only chowns the directories named, not the parents it creates along the
+# way, so ~/.cache, ~/.local/share and ~/.config are listed too: corepack's
+# own cache sits at ~/.cache/node next to ~/.cache/ms-playwright, and without
+# write access there `pnpm`/`yarn` fail outright.
+RUN install -d -o claude -g claude \
+  /home/claude/.npm \
+  /home/claude/.cache \
+  /home/claude/.cache/ms-playwright \
+  /home/claude/.local \
+  /home/claude/.local/share \
+  /home/claude/.local/share/pnpm \
+  /home/claude/.config \
+  /home/claude/.config/pnpm
+
+# npm already looks under ~/.npm and Playwright under ~/.cache/ms-playwright
+# by default, so those two needed no configuration. pnpm does not: without a
+# store-dir set, it puts its store at the root of whatever filesystem the
+# current Workspace happens to sit on, so the Box Cache mounted above would
+# otherwise go unused. This is pnpm's own config file rather than the shared
+# ~/.npmrc, because npm reads that file too and warns on every command about
+# a "store-dir" key it does not understand.
+RUN printf 'store-dir=/home/claude/.local/share/pnpm\n' > /home/claude/.config/pnpm/rc \
+  && chown claude:claude /home/claude/.config/pnpm/rc
+
 # Managed settings outrank anything in the claude-home volume, so the pinned
 # version holds even after a developer has used the Box for a while.
 COPY image/managed-settings.json /etc/claude-code/managed-settings.json

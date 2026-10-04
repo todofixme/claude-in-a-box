@@ -28,6 +28,11 @@ readonly BOX_DOCKER_DATA="/var/lib/docker"
 # mechanism: the Image configures neither tool.
 readonly BOX_CACHE_MAVEN="$BOX_HOME/.m2"
 readonly BOX_CACHE_GRADLE="$BOX_HOME/.gradle"
+# Same mechanism for the frontend tools: npm's cache, pnpm's store and the
+# Playwright browser cache, each where the tool already looks by default.
+readonly BOX_CACHE_NPM="$BOX_HOME/.npm"
+readonly BOX_CACHE_PNPM="$BOX_HOME/.local/share/pnpm"
+readonly BOX_CACHE_PLAYWRIGHT="$BOX_HOME/.cache/ms-playwright"
 
 usage() {
   cat <<USAGE
@@ -128,6 +133,9 @@ box_name="claude-box-$workspace_id"
 docker_volume="claude-docker-$workspace_id"
 maven_volume="claude-maven-$workspace_id"
 gradle_volume="claude-gradle-$workspace_id"
+npm_volume="claude-npm-$workspace_id"
+pnpm_volume="claude-pnpm-$workspace_id"
+playwright_volume="claude-playwright-$workspace_id"
 
 docker_argv=(
   docker run --rm -i
@@ -142,6 +150,9 @@ docker_argv=(
   # so each Box Cache wins over what the home volume holds there.
   -v "$maven_volume:$BOX_CACHE_MAVEN"
   -v "$gradle_volume:$BOX_CACHE_GRADLE"
+  -v "$npm_volume:$BOX_CACHE_NPM"
+  -v "$pnpm_volume:$BOX_CACHE_PNPM"
+  -v "$playwright_volume:$BOX_CACHE_PLAYWRIGHT"
   -w "$workspace"
 )
 

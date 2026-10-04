@@ -166,7 +166,7 @@ box_shell() {
   # at the same place in its own filesystem, so the Host's path is the honest
   # thing to look for.
   run box_shell '
-    for path in '"$HOME"' '"$HOME"'/.m2 '"$HOME"'/.gradle; do
+    for path in '"$HOME"' '"$HOME"'/.m2 '"$HOME"'/.gradle '"$HOME"'/.npm '"$HOME"'/.local/share/pnpm '"$HOME"'/.cache/ms-playwright; do
       test -e "$path" && echo "VISIBLE $path"
     done
     echo DONE'
@@ -176,28 +176,32 @@ box_shell() {
 }
 
 @test "what a build downloads lands in the Workspace's Box Caches and the next Box finds it" {
-  # Where Maven and Gradle themselves put dependencies and wrapper
-  # distributions, with no setting in the Image pointing them anywhere else.
+  # Where Maven, Gradle, npm, pnpm and Playwright themselves put what they
+  # download, with no setting in the Image pointing any of them anywhere else.
   run box_shell '
-    mkdir -p ~/.m2/repository ~/.gradle/wrapper/dists
-    echo downloaded > ~/.m2/repository/marker
-    echo downloaded > ~/.gradle/wrapper/dists/marker
+    mkdir -p ~/.m2/repository ~/.gradle/wrapper/dists ~/.npm ~/.local/share/pnpm ~/.cache/ms-playwright
+    for path in ~/.m2/repository/marker ~/.gradle/wrapper/dists/marker ~/.npm/marker ~/.local/share/pnpm/marker ~/.cache/ms-playwright/marker; do
+      echo downloaded > "$path"
+    done
     id -un'
   [ "$status" -eq 0 ]
   [[ "$output" == *"claude"* ]]
 
   # A second Box: the Box Caches are volumes, so they outlive the first one.
-  run box_shell 'cat ~/.m2/repository/marker ~/.gradle/wrapper/dists/marker'
+  run box_shell 'cat ~/.m2/repository/marker ~/.gradle/wrapper/dists/marker ~/.npm/marker ~/.local/share/pnpm/marker ~/.cache/ms-playwright/marker'
   [ "$status" -eq 0 ]
-  [ "$(printf '%s\n' "$output" | grep -c downloaded)" -eq 2 ]
+  [ "$(printf '%s\n' "$output" | grep -c downloaded)" -eq 5 ]
 }
 
 @test "another Workspace downloads into Box Caches of its own" {
-  run box_shell 'mkdir -p ~/.m2/repository && echo here > ~/.m2/repository/marker'
+  run box_shell '
+    mkdir -p ~/.m2/repository ~/.local/share/pnpm
+    echo here > ~/.m2/repository/marker
+    echo here > ~/.local/share/pnpm/marker'
   [ "$status" -eq 0 ]
 
   enter_other_workspace
-  run box_shell 'cat ~/.m2/repository/marker 2>&1; ls -A ~/.m2'
+  run box_shell 'cat ~/.m2/repository/marker ~/.local/share/pnpm/marker 2>&1; ls -A ~/.m2 ~/.local/share/pnpm 2>&1'
   status_other="$status"
   other_output="$output"
   forget_workspace_volumes

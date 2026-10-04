@@ -11,11 +11,15 @@ load helper
 
 setup_file() {
   require_test_image
-  # The pinned version, read from the one place that pins it.
+  # The pinned versions, read from the one place that pins each.
   PINNED_CLAUDE_VERSION="$(
     sed -n 's/^ARG CLAUDE_CODE_VERSION=\(.*\)$/\1/p' "$BATS_TEST_DIRNAME/../Dockerfile"
   )"
   export PINNED_CLAUDE_VERSION
+  PINNED_PLAYWRIGHT_CLI_VERSION="$(
+    sed -n 's/^ARG PLAYWRIGHT_CLI_VERSION=\(.*\)$/\1/p' "$BATS_TEST_DIRNAME/../Dockerfile"
+  )"
+  export PINNED_PLAYWRIGHT_CLI_VERSION
 }
 
 # Runs a command in a throwaway Box, as the Image's default user.
@@ -118,4 +122,50 @@ in_box() {
   run in_box stat -c '%U:%G' /home/claude/.m2 /home/claude/.gradle
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'claude:claude')" -eq 2 ]
+}
+
+@test "corepack is enabled, so pnpm and yarn shims are on the PATH" {
+  run in_box bash -c 'command -v corepack && command -v pnpm && command -v yarn'
+  [ "$status" -eq 0 ]
+}
+
+@test "Playwright CLI is installed at the version the Image pins" {
+  [ -n "$PINNED_PLAYWRIGHT_CLI_VERSION" ]
+  run in_box playwright-cli --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$PINNED_PLAYWRIGHT_CLI_VERSION"* ]]
+}
+
+@test "the Image carries the system libraries headless Chromium needs" {
+  run in_box bash -c 'dpkg -s libnss3 libatk-bridge2.0-0t64 libgbm1 >/dev/null && echo OK'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"OK"* ]]
+}
+
+@test "the Image sets no npm, pnpm or Playwright environment: each Box Cache sits where the tool already looks" {
+  run in_box env
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"NPM_CONFIG_CACHE"* ]]
+  [[ "$output" != *"PNPM_HOME"* ]]
+  [[ "$output" != *"PLAYWRIGHT_BROWSERS_PATH"* ]]
+}
+
+@test "~/.npm, ~/.local/share/pnpm and ~/.cache/ms-playwright belong to claude, so the Box Caches seed correctly" {
+  run in_box stat -c '%U:%G' /home/claude/.npm /home/claude/.local/share/pnpm /home/claude/.cache/ms-playwright
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'claude:claude')" -eq 3 ]
+}
+
+@test "pnpm is pointed at the Box Cache store-dir, since its own default ignores \$HOME" {
+  run in_box pnpm store path
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/home/claude/.local/share/pnpm/"* ]]
+}
+
+@test "~/.cache and ~/.local/share belong to claude too, so a tool can create a sibling directory there" {
+  # corepack's own cache lands at ~/.cache/node, next to ~/.cache/ms-playwright
+  # above: a parent `install -d` left root-owned would block that with EACCES.
+  run in_box stat -c '%U:%G' /home/claude/.cache /home/claude/.local /home/claude/.local/share
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c 'claude:claude')" -eq 3 ]
 }

@@ -186,6 +186,46 @@ A Workspace whose dependencies come from a private repository will not build in
 a Box: the credentials for it live in the `settings.xml` and
 `gradle.properties` that stay on the Host.
 
+## Frontend tooling
+
+Corepack ships with Node and is enabled in the Image, so `pnpm` and `yarn`
+resolve to whatever version a Workspace declares in its `package.json`
+`"packageManager"` field, downloading that version the first time it is used.
+
+The Image also carries [Playwright CLI](https://playwright.dev) (`playwright-cli`),
+installed globally at a version pinned in the `Dockerfile`, so Claude can drive
+a browser directly:
+
+```sh
+playwright-cli --browser chromium open https://example.com
+playwright-cli screenshot --filename=shot.png
+```
+
+`--browser chromium` is needed on every call: Playwright CLI defaults to a real
+Google Chrome, which the Image does not install, only the headless Chromium
+build Playwright downloads itself and the system libraries it needs to run
+(both installed the same way for the Workspace's own `@playwright/test`).
+
+Like Maven and Gradle, npm's cache, pnpm's store and the Playwright browser
+cache are Box Caches of the Workspace:
+
+| In the Box                 | Volume                                     |
+| --------------------------- | ------------------------------------------- |
+| `~/.npm`                    | `claude-npm-my-service-<digest>`           |
+| `~/.local/share/pnpm`       | `claude-pnpm-my-service-<digest>`          |
+| `~/.cache/ms-playwright`     | `claude-playwright-my-service-<digest>`    |
+
+npm and Playwright already look in those two places by default, so neither is
+configured. pnpm is the exception: left to itself it ignores `$HOME` and puts
+its store at the root of whatever filesystem the current Workspace happens to
+sit on, which would make the volume above pointless, so the Image points it at
+`~/.local/share/pnpm` through pnpm's own config file (not `~/.npmrc`, which npm
+reads too and would warn about the setting on every command).
+
+The Workspace's own `@playwright/test` downloads its matching browser the same way
+Playwright CLI's did, into the same Box Cache, so the second Box on a Workspace
+runs its E2E suite without downloading anything.
+
 ## What persists between Boxes
 
 A Box itself is thrown away when you leave it (`docker run --rm`). The volumes
@@ -196,8 +236,12 @@ survive it:
 - `claude-docker-<workspace>-<digest>`, mounted at `/var/lib/docker`, holds
   one Workspace's Test Container images.
 - `claude-maven-<workspace>-<digest>` and
-  `claude-gradle-<workspace>-<digest>`, the Box Caches of the section above,
-  hold one Workspace's dependencies.
+  `claude-gradle-<workspace>-<digest>`, the Box Caches of the Maven and Gradle
+  section, hold one Workspace's backend dependencies.
+- `claude-npm-<workspace>-<digest>`, `claude-pnpm-<workspace>-<digest>` and
+  `claude-playwright-<workspace>-<digest>`, the Box Caches of the Frontend
+  tooling section, hold one Workspace's frontend dependencies and downloaded
+  browsers.
 
 To start over with a clean slate, including logging in again:
 
@@ -216,8 +260,10 @@ To reclaim the disk a Workspace's dependencies take, or to make its next build
 download them again:
 
 ```sh
-docker volume ls | grep -E 'claude-(maven|gradle)'
-docker volume rm claude-maven-my-service-1a2b3c4d5e6f claude-gradle-my-service-1a2b3c4d5e6f
+docker volume ls | grep -E 'claude-(maven|gradle|npm|pnpm|playwright)'
+docker volume rm claude-maven-my-service-1a2b3c4d5e6f claude-gradle-my-service-1a2b3c4d5e6f \
+  claude-npm-my-service-1a2b3c4d5e6f claude-pnpm-my-service-1a2b3c4d5e6f \
+  claude-playwright-my-service-1a2b3c4d5e6f
 ```
 
 ## What the Image contains
@@ -228,6 +274,9 @@ docker volume rm claude-maven-my-service-1a2b3c4d5e6f claude-gradle-my-service-1
   runs as
 - JDK 21, for Kotlin/Spring Boot builds
 - Docker Engine with the Compose plugin, for the daemon the Box runs itself
+- Corepack, enabled, for `pnpm` and `yarn`
+- Playwright CLI, installed from npm at a version pinned in the `Dockerfile`,
+  with the system libraries headless Chromium needs
 
 A Box starts as root, long enough for its entrypoint to bring up `dockerd`
 (`/var/log/dockerd.log` inside the Box, if it ever does not), and drops to
@@ -265,9 +314,9 @@ The suite is in three parts:
 
 - `tests/cli.bats` — the `docker run` command `claude-box` assembles, via
   `--dry-run`. Needs neither Docker nor an Image.
-- `tests/image.bats` — the built Image: user, sudo, pinned version, managed
-  settings, JDK, Docker Engine, and that it configures Maven and Gradle not at
-  all.
+- `tests/image.bats` — the built Image: user, sudo, pinned versions, managed
+  settings, JDK, Docker Engine, corepack, Playwright CLI and the Chromium
+  libraries it needs, and that it configures Maven, Gradle and npm not at all.
 - `tests/box.bats` — real Boxes: the Workspace mount, state surviving a
   restart, separate session histories per Workspace, the Box's own Docker and
   its per-Workspace Docker data, one Box per Workspace, and the Box Caches a
