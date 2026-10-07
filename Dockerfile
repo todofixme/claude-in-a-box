@@ -1,4 +1,4 @@
-FROM node:24-trixie
+FROM node:24-trixie@sha256:1278a37eb510ec1606fba0e80f554bcc941ae0b44f35ae373c4822ae7717c64d
 
 # The one place the Claude Code version is pinned.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
