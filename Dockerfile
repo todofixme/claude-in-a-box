@@ -2,7 +2,7 @@ FROM node:24-trixie@sha256:1278a37eb510ec1606fba0e80f554bcc941ae0b44f35ae373c482
 
 # The one place the Claude Code version is pinned.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VERSION=2.1.292
+ARG CLAUDE_CODE_VERSION=2.1.293
 
 # `claude` must own its home directory, because the claude-home volume is
 # seeded from it. node:24 already holds UID/GID 1000 with the `node` user, so
