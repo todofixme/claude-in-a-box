@@ -348,6 +348,30 @@ To make a Workspace's Code Graph be built again from scratch:
 docker volume rm claude-codegraph-my-service-1a2b3c4d5e6f
 ```
 
+## Status line
+
+Claude's status line is drawn by
+[ccstatusline](https://github.com/sirmalloc/ccstatusline), installed in the
+Image at a version pinned in the `Dockerfile` and set as Claude's `statusLine`
+through the Image's managed settings. A fresh `claude-home` gets ccstatusline's
+default layout.
+
+To change the layout, open a shell in a Box and start ccstatusline's
+interactive editor there:
+
+```sh
+claude-box --shell
+ccstatusline
+```
+
+The editor saves to `~/.config/ccstatusline/settings.json`, which lies in
+`claude-home`, so every later Box shows the new layout. Nothing needs
+installing on the Host.
+
+The status line is set in managed settings, so a `statusLine` in a
+Workspace's `.claude/settings.json` or in `~/.claude/settings.json` has no
+effect in a Box.
+
 ## What the Image contains
 
 - `node:24-trixie` as the base
