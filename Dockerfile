@@ -79,7 +79,7 @@ RUN corepack enable
 # claude-home volume already covers, so nothing further is needed here for it
 # to survive a Box restart.
 # renovate: datasource=npm depName=ccstatusline
-ARG CCSTATUSLINE_VERSION=2.2.30
+ARG CCSTATUSLINE_VERSION=2.2.32
 RUN npm install -g "ccstatusline@${CCSTATUSLINE_VERSION}" \
   && npm cache clean --force
 
