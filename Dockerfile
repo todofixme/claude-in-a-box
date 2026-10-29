@@ -1,4 +1,4 @@
-FROM node:24-trixie@sha256:1278a37eb510ec1606fba0e80f554bcc941ae0b44f35ae373c4822ae7717c64d
+FROM node:24-trixie@sha256:8c761eca2bf7eec965f946cf47b8090143cb41f45f2f8699af0cc0298d2d2d19
 
 # The one place the Claude Code version is pinned.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
@@ -107,7 +107,7 @@ RUN npm install -g "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
 # asset is ever renamed. Nothing registers the server here — a Box gets it
 # only through `claude-box --code-graph`.
 # renovate: datasource=github-releases depName=DeusData/codebase-memory-mcp
-ARG CODEBASE_MEMORY_MCP_VERSION=v0.11.0
+ARG CODEBASE_MEMORY_MCP_VERSION=v0.12.1
 RUN tmp="$(mktemp -d)" \
   && cd "$tmp" \
   && base="https://github.com/DeusData/codebase-memory-mcp/releases/download/${CODEBASE_MEMORY_MCP_VERSION}" \
