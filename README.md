@@ -84,6 +84,7 @@ claude-box -- --shell
 | `--shell`       | Open a bash login shell in the Box instead of Claude               |
 | `--code-graph`  | Give Claude a Code Graph of the Workspace (see below)              |
 | `--no-pull`     | Use the Image already on the Host instead of pulling a new one     |
+| `--pull-only`   | Pull the Image and exit without starting a Box                     |
 | `--image REF`   | Start the Box from another Image                                   |
 | `--dry-run`     | Print the `docker run` command instead of running it               |
 | `--help`        | Show usage                                                         |
@@ -105,6 +106,18 @@ versions without doing anything. `--no-pull` is the escape hatch for working
 offline or testing an Image you built yourself. It refuses to pull rather than
 pulling when the Image is absent, so a mistyped `--image` fails on the Host
 instead of being fetched from somewhere.
+
+If the pull at every start takes too long, pull on a schedule instead and start
+every Box with `--no-pull`. `--pull-only` pulls the Image and exits; it honours
+`--image` and `CLAUDE_BOX_IMAGE`, needs no Workspace, and exits non-zero when
+the pull fails. In a crontab, for instance:
+
+```cron
+0 * * * * PATH=/usr/local/bin:/usr/bin:/bin claude-box --pull-only
+```
+
+A Box that is already running keeps the Image it started from. Each new Image
+leaves the old one behind untagged; `docker image prune` removes it.
 
 ## How the Workspace reaches the Box
 

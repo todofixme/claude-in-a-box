@@ -62,6 +62,7 @@ Options:
                        graph can lag the working tree, so \`git diff\` and
                        reading files stay the answer to what just changed
   --no-pull            Use the Image already on the Host instead of pulling
+  --pull-only          Pull the Image and exit without starting a Box
   --image REF          Image to start the Box from
                        (default: \$CLAUDE_BOX_IMAGE, else $DEFAULT_IMAGE)
   --dry-run            Print the docker command instead of running it
@@ -102,8 +103,17 @@ pass_env_if_set() {
   done
 }
 
+# Under --dry-run, prints docker_argv and ends the script.
+exit_if_dry_run() {
+  [ "$dry_run" -eq 1 ] || return 0
+  printf '%q ' "${docker_argv[@]}"
+  printf '\n'
+  exit 0
+}
+
 image="${CLAUDE_BOX_IMAGE:-$DEFAULT_IMAGE}"
 pull=1
+pull_only=0
 shell=0
 dry_run=0
 # Any non-empty value turns it on, the same reading pass_env_if_set gives the
@@ -124,6 +134,10 @@ while [ $# -gt 0 ]; do
       ;;
     --no-pull)
       pull=0
+      shift
+      ;;
+    --pull-only)
+      pull_only=1
       shift
       ;;
     --image)
@@ -155,6 +169,20 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+# Ends here, ahead of everything that describes a Box: a scheduled pull has no
+# Workspace to speak of and must not trip over one that already has a Box
+# running. --code-graph stays allowed, because CLAUDE_BOX_CODE_GRAPH may be set
+# for every Box, and a pull has nothing to do with it.
+if [ "$pull_only" -eq 1 ]; then
+  [ "$pull" -eq 1 ] || die "--pull-only and --no-pull exclude each other"
+  [ "$shell" -eq 0 ] || die "--pull-only starts no Box to open a shell in"
+  [ ${#claude_argv[@]} -eq 0 ] || die "--pull-only takes no Claude arguments"
+  docker_argv=(docker pull "$image")
+  exit_if_dry_run
+  command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
+  exec "${docker_argv[@]}"
+fi
 
 workspace="$(pwd -P)"
 home_volume="${CLAUDE_BOX_HOME_VOLUME:-$DEFAULT_HOME_VOLUME}"
@@ -264,11 +292,7 @@ else
   fi
 fi
 
-if [ "$dry_run" -eq 1 ]; then
-  printf '%q ' "${docker_argv[@]}"
-  printf '\n'
-  exit 0
-fi
+exit_if_dry_run
 
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
 

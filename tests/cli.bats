@@ -66,6 +66,57 @@ teardown() {
   [[ "$output" != *"--pull always"* ]]
 }
 
+@test "--pull-only pulls the Image and starts no Box" {
+  run "$CLAUDE_BOX" --dry-run --pull-only
+  [ "$status" -eq 0 ]
+  [ "$output" = "docker pull ghcr.io/todofixme/claude-in-a-box:latest " ]
+}
+
+@test "--pull-only pulls the Image --image names" {
+  run "$CLAUDE_BOX" --dry-run --pull-only --image claude-in-a-box:from-flag
+  [ "$status" -eq 0 ]
+  [ "$output" = "docker pull claude-in-a-box:from-flag " ]
+}
+
+@test "--pull-only pulls the Image CLAUDE_BOX_IMAGE names" {
+  CLAUDE_BOX_IMAGE=claude-in-a-box:from-env run "$CLAUDE_BOX" --dry-run --pull-only
+  [ "$status" -eq 0 ]
+  [ "$output" = "docker pull claude-in-a-box:from-env " ]
+}
+
+@test "--pull-only ignores CLAUDE_BOX_CODE_GRAPH, which may be set for every Box" {
+  CLAUDE_BOX_CODE_GRAPH=1 run "$CLAUDE_BOX" --dry-run --pull-only
+  [ "$status" -eq 0 ]
+  [ "$output" = "docker pull ghcr.io/todofixme/claude-in-a-box:latest " ]
+}
+
+@test "--pull-only reports a failed pull through its exit status" {
+  bin="$(mktemp -d)"
+  printf '#!/bin/sh\nexit 7\n' >"$bin/docker"
+  chmod +x "$bin/docker"
+  PATH="$bin:$PATH" run "$CLAUDE_BOX" --pull-only
+  rm -rf "$bin"
+  [ "$status" -eq 7 ]
+}
+
+@test "--pull-only rejects --no-pull" {
+  run "$CLAUDE_BOX" --dry-run --pull-only --no-pull
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--pull-only and --no-pull exclude each other"* ]]
+}
+
+@test "--pull-only rejects --shell" {
+  run "$CLAUDE_BOX" --dry-run --pull-only --shell
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--pull-only starts no Box"* ]]
+}
+
+@test "--pull-only rejects Claude arguments rather than silently dropping them" {
+  run "$CLAUDE_BOX" --dry-run --pull-only --resume
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--pull-only takes no Claude arguments"* ]]
+}
+
 @test "--image starts the Box from a locally built Image" {
   run "$CLAUDE_BOX" --dry-run --no-pull --image claude-in-a-box:dev
   [ "$status" -eq 0 ]
@@ -112,6 +163,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"--shell"* ]]
   [[ "$output" == *"--no-pull"* ]]
+  [[ "$output" == *"--pull-only"* ]]
   [[ "$output" == *"--image"* ]]
   [[ "$output" != *"docker run"* ]]
 }
