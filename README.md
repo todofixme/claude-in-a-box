@@ -230,18 +230,33 @@ resolve to whatever version a Workspace declares in its `package.json`
 `"packageManager"` field, downloading that version the first time it is used.
 
 The Image also carries [Playwright CLI](https://playwright.dev) (`playwright-cli`),
-installed globally at a version pinned in the `Dockerfile`, so Claude can drive
-a browser directly:
+installed globally at a version pinned in the `Dockerfile`, together with the
+Chromium build that version expects, so Claude can drive a browser directly from
+the first second of every Box:
 
 ```sh
-playwright-cli --browser chromium open https://example.com
+playwright-cli open https://example.com
 playwright-cli screenshot --filename=shot.png
 ```
 
-`--browser chromium` is needed on every call: Playwright CLI defaults to a real
-Google Chrome, which the Image does not install, only the headless Chromium
-build Playwright downloads itself and the system libraries it needs to run
-(both installed the same way for the Workspace's own `@playwright/test`).
+Playwright CLI defaults to a real Google Chrome, which does not exist for
+linux/arm64. The Image therefore points it at its own Chromium through
+`PLAYWRIGHT_MCP_BROWSER` and `PLAYWRIGHT_MCP_EXECUTABLE_PATH`, so no call needs
+`--browser`. That Chromium lives under `/opt/ms-playwright`, outside the
+Playwright Box Cache below, which would otherwise hide it.
+
+Playwright CLI's own `playwright-cli` skill, which teaches Claude its commands
+and workflows (tests, request mocking, tracing, video, test generation), is
+copied from the installed package into Claude Code's managed skills directory,
+`/etc/claude-code/.claude/skills`. Every Box loads it, it always matches the
+installed version, and a Workspace needs neither to check it in nor to run
+`playwright-cli install --skills`, which would download a second Chromium.
+
+What Claude needs to know about every Box, whatever the Workspace, is in a
+managed `CLAUDE.md` at `/etc/claude-code/CLAUDE.md` (source:
+`image/CLAUDE.md`): for instance, that there is no Chrome and no display, and
+that the pinned tooling is not to be updated. A Workspace's own `CLAUDE.md`
+only needs what is specific to it, such as how to start its dev server.
 
 Like Maven and Gradle, npm's cache, pnpm's store and the Playwright browser
 cache are Box Caches of the Workspace:
@@ -259,9 +274,9 @@ sit on, which would make the volume above pointless, so the Image points it at
 `~/.local/share/pnpm` through pnpm's own config file (not `~/.npmrc`, which npm
 reads too and would warn about the setting on every command).
 
-The Workspace's own `@playwright/test` downloads its matching browser the same way
-Playwright CLI's did, into the same Box Cache, so the second Box on a Workspace
-runs its E2E suite without downloading anything.
+The Workspace's own `@playwright/test` downloads its matching browser into that
+Box Cache, so the second Box on a Workspace runs its E2E suite without
+downloading anything.
 
 ## Code Graph
 
@@ -395,14 +410,17 @@ effect in a Box.
 - Docker Engine with the Compose plugin, for the daemon the Box runs itself
 - Corepack, enabled, for `pnpm` and `yarn`
 - Playwright CLI, installed from npm at a version pinned in the `Dockerfile`,
-  with the system libraries headless Chromium needs
+  with the Chromium build it expects and the system libraries Chromium needs, and its `playwright-cli` skill as a managed skill
+- A managed `CLAUDE.md` telling Claude what is different about a Box
 - `codebase-memory-mcp`, the Code Graph server, downloaded from its GitHub
   release at a version pinned in the `Dockerfile` and verified against that
   release's `checksums.txt` at build time. Registered for a Box only by
   `--code-graph`
 - `git`, `gh` (from GitHub's own apt repository), `glab`, `jq`, `yq`,
-  `ripgrep`, `httpie` and `curl`, all otherwise from Debian's own apt
-  repository
+  `ripgrep`, `httpie`, `shellcheck`, `rsync` and `curl`, all otherwise from
+  Debian's own apt repository
+- `psql` 18 (`postgresql-client-18`), from the PostgreSQL project's own apt
+  repository, since Debian trixie only packages the 17 client
 
 A Box starts as root, long enough for its entrypoint to bring up `dockerd`
 (`/var/log/dockerd.log` inside the Box, if it ever does not), and drops to
@@ -441,8 +459,8 @@ The suite is in three parts:
 - `tests/cli.bats` — the `docker run` command `claude-box` assembles, via
   `--dry-run`. Needs neither Docker nor an Image.
 - `tests/image.bats` — the built Image: user, sudo, pinned versions, managed
-  settings, JDK, Docker Engine, corepack, Playwright CLI and the Chromium
-  libraries it needs, the Code Graph server, and that it configures Maven,
+  settings, JDK, Docker Engine, corepack, Playwright CLI driving the Image's
+  own Chromium, the Code Graph server, and that it configures Maven,
   Gradle and npm not at all.
 - `tests/box.bats` — real Boxes: the Workspace mount, state surviving a
   restart, separate session histories per Workspace, the Box's own Docker and
