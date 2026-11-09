@@ -44,9 +44,9 @@ RUN apt-get update \
 
 # `gh`'s own apt repository, the same pattern as Docker's above, because
 # Debian does not package it. `git`, `glab`, `jq`, `yq`, `ripgrep` (binary
-# `rg`) and `httpie` (binary `http`) are already in Debian's own repository,
-# so no extra repository is needed for those; `curl` is too, but is already
-# installed by the Docker Engine step above.
+# `rg`), `httpie` (binary `http`), `shellcheck` and `rsync` are already in
+# Debian's own repository, so no extra repository is needed for those; `curl`
+# is too, but is already installed by the Docker Engine step above.
 RUN install -m 0755 -d /etc/apt/keyrings \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -56,7 +56,24 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     > /etc/apt/sources.list.d/github-cli.list \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
-    git gh glab jq yq ripgrep httpie \
+    git gh glab jq yq ripgrep httpie shellcheck rsync \
+  && rm -rf /var/lib/apt/lists/*
+
+# `psql` 18 from the PostgreSQL project's own apt repository (PGDG), the same
+# pattern as Docker's and gh's above, because Debian trixie only packages the
+# 17 client. Client only: a Workspace that needs a server runs one in the
+# Box's dockerd. Debian's postgresql-common wrapper puts `psql` on the PATH
+# and resolves it to the newest installed client, which is this one.
+RUN install -m 0755 -d /etc/apt/keyrings \
+  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    -o /etc/apt/keyrings/postgresql.asc \
+  && chmod a+r /etc/apt/keyrings/postgresql.asc \
+  && printf 'deb [arch=%s signed-by=/etc/apt/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt %s-pgdg main\n' \
+    "$(dpkg --print-architecture)" \
+    "$(. /etc/os-release && echo "$VERSION_CODENAME")" \
+    > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends postgresql-client-18 \
   && rm -rf /var/lib/apt/lists/*
 
 # Maven and Gradle download into ~/.m2 and ~/.gradle, and claude-box mounts a
@@ -83,17 +100,46 @@ ARG CCSTATUSLINE_VERSION=2.2.34
 RUN npm install -g "ccstatusline@${CCSTATUSLINE_VERSION}" \
   && npm cache clean --force
 
-# Playwright CLI, pinned version, so Claude can drive a browser directly.
-# Only the system libraries headless Chromium needs are installed in the
-# Image, since those are the same for every Chromium build; the browser
-# binary itself is not baked in here, the same way the Image carries no
-# Gradle distribution. It downloads on first use into a Box Cache of the
-# Workspace, like the Workspace's own `@playwright/test` browser does.
+# Playwright CLI, pinned version, so Claude can drive a browser directly,
+# together with the Chromium build that version of Playwright expects and the
+# system libraries it needs. The browser is baked in so that it is there in
+# every Box from the first second, rather than downloaded into each new
+# Workspace's Box Cache on first use.
+#
+# It goes to /opt/ms-playwright, not ~/.cache/ms-playwright: the Playwright
+# Box Cache is mounted over the latter and would hide it. PLAYWRIGHT_BROWSERS_PATH
+# is set for this one step only, so a Workspace's own `@playwright/test` still
+# downloads its matching browser into the Box Cache as before.
+#
+# Chromium rather than Google Chrome, which Playwright CLI defaults to: Chrome
+# is not available for linux/arm64. The two PLAYWRIGHT_MCP_* variables point
+# Playwright CLI at this Chromium so that no call needs `--browser chromium`.
+# The executable's path contains Playwright's browser revision, which changes
+# with every Playwright CLI update, hence the stable symlink. `--no-shell`
+# skips the separate headless shell build: Playwright CLI is given the full
+# Chromium executable, which runs headless just as well.
+#
+# The package's own `playwright-cli` skill goes to Claude Code's managed skills
+# directory, which every Box loads and the claude-home volume does not cover,
+# so it always matches the installed version. Copied rather than installed
+# with `playwright-cli install --skills`, which writes into the current
+# directory and downloads a second Chromium into the Playwright cache.
 # renovate: datasource=npm depName=@playwright/cli
 ARG PLAYWRIGHT_CLI_VERSION=0.1.22
 RUN npm install -g "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
   && npm cache clean --force \
-  && "$(npm root -g)/@playwright/cli/node_modules/.bin/playwright" install-deps chromium
+  && install -d /etc/claude-code/.claude/skills \
+  && cp -r "$(npm root -g)/@playwright/cli/skills/playwright-cli" /etc/claude-code/.claude/skills/ \
+  && [ -f /etc/claude-code/.claude/skills/playwright-cli/SKILL.md ] \
+  && PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    "$(npm root -g)/@playwright/cli/node_modules/.bin/playwright" install --with-deps --no-shell chromium \
+  && chromium="$(find /opt/ms-playwright -path '*/chromium-*/chrome-linux*/chrome' -type f)" \
+  && [ "$(printf '%s\n' "$chromium" | wc -l)" -eq 1 ] \
+  && [ -x "$chromium" ] \
+  && ln -s "$chromium" /opt/ms-playwright/chromium \
+  && rm -rf /var/lib/apt/lists/*
+ENV PLAYWRIGHT_MCP_BROWSER=chromium \
+  PLAYWRIGHT_MCP_EXECUTABLE_PATH=/opt/ms-playwright/chromium
 
 # codebase-memory-mcp serves the Code Graph of a Workspace (ADR-0005). Pinned
 # here and nowhere else, downloaded from the upstream release and verified
@@ -154,6 +200,12 @@ RUN printf 'store-dir=/home/claude/.local/share/pnpm\n' > /home/claude/.config/p
 # Managed settings outrank anything in the claude-home volume, so the pinned
 # version holds even after a developer has used the Box for a while.
 COPY image/managed-settings.json /etc/claude-code/managed-settings.json
+
+# Managed CLAUDE.md: what Claude needs to know about every Box, whatever the
+# Workspace, so that no Workspace has to repeat it in its own CLAUDE.md. Like
+# managed settings, it lives outside the claude-home volume and changes only
+# with the Image.
+COPY image/CLAUDE.md /etc/claude-code/CLAUDE.md
 
 # The Box starts as root only so that the entrypoint can bring up dockerd; it
 # drops to claude before running anything the Box was started for.

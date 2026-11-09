@@ -144,9 +144,15 @@ in_box() {
   [[ "$output" == *"docker"* ]]
 }
 
-@test "the Image carries git, gh, glab, jq, yq, ripgrep, httpie and curl" {
-  run in_box bash -c 'command -v git gh glab jq yq rg http curl'
+@test "the Image carries git, gh, glab, jq, yq, ripgrep, httpie, shellcheck, rsync and curl" {
+  run in_box bash -c 'command -v git gh glab jq yq rg http shellcheck rsync curl'
   [ "$status" -eq 0 ]
+}
+
+@test "the Image carries psql 18" {
+  run in_box psql --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == "psql (PostgreSQL) 18"* ]]
 }
 
 @test "the Image sets no Maven or Gradle environment: a Box Cache on each directory is all it takes" {
@@ -178,6 +184,26 @@ in_box() {
   run in_box bash -c 'dpkg -s libnss3 libatk-bridge2.0-0t64 libgbm1 >/dev/null && echo OK'
   [ "$status" -eq 0 ]
   [[ "$output" == *"OK"* ]]
+}
+
+@test "Playwright CLI drives the Image's own Chromium without --browser, even with an empty Box Cache over ~/.cache/ms-playwright" {
+  run docker run --rm --pull never --tmpfs /home/claude/.cache/ms-playwright:uid=1000,gid=1000 "$IMAGE" \
+    bash -c 'cd /tmp && playwright-cli open https://example.com && playwright-cli screenshot --filename=/tmp/shot.png && test -s /tmp/shot.png'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Page Title: Example Domain"* ]]
+}
+
+@test "Playwright CLI's own skill is a managed skill, identical to the one the installed version ships" {
+  run in_box bash -c 'diff -r "$(npm root -g)/@playwright/cli/skills/playwright-cli" /etc/claude-code/.claude/skills/playwright-cli'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "Claude loads the Image's managed CLAUDE.md and the playwright-cli skill as managed" {
+  run in_box bash -c 'cd /tmp && claude -p /context'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"| Managed | /etc/claude-code/CLAUDE.md |"* ]]
+  [[ "$output" == *"| playwright-cli | Managed |"* ]]
 }
 
 @test "the Image sets no npm, pnpm or Playwright environment: each Box Cache sits where the tool already looks" {
